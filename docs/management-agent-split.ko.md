@@ -9,9 +9,12 @@ ARTEX 를 **제어판(Management Server)** 과 **실행면(Agent)** 으로 나�
 > - **P2-A**: 커맨드형 커스텀 도구의 Bash.
 > - **P2-B**: 커스텀 script/http 도구, enrich 의 DNS·HTTP 프로브(`execsvc` 내부 서비스).
 > - **P2-C**: 작업별 Agent 핀 고정(다중 Agent 라우팅).
+> - **P2-D**: traffic 기록 스토어(MITM 프록시+SQLite 인덱스+blob)와 조회 도구
+>   (traffic_search/get/blob)를 Agent 에서 호스팅. 바인딩 시점 증거는
+>   `__artex_traffic_evidence` 로 제어판에 동기화(스냅샷 후 리포트는 Agent 비의존).
 >
-> docker-compose e2e(`e2e/run.sh`)가 Bash·`__artex_dns`·pin/unpin 을 검증합니다.
-> 남은 범위(traffic 스토어 이전, Agent 호스팅 MCP)는 아래 "로드맵" 참고.
+> docker-compose e2e(`e2e/run.sh`)가 Bash·`__artex_dns`·샌드박스 트래픽 캡처→조회
+> →증거 동기화·pin/unpin 을 검증합니다. 남은 범위(Agent 호스팅 MCP)는 "로드맵" 참고.
 
 ## 왜 포크 없이 되는가 (핵심 설계)
 
@@ -43,6 +46,8 @@ PreToolUse 게이트(intercept 규칙, LLM 심판, 사람 승인)는 디스패�
 | MCP(github 등 제어판 도구) | — *(Agent 호스팅 MCP 는 로드맵)* |
 | 커스텀 도구 정의·템플릿·시크릿 주입 | 커스텀 **command/script/http 실행부** |
 | enrich 엔진·자산 그래프 쓰기(DB) | enrich **DNS·HTTP 프로브** 네트워크 I/O |
+| traffic 조회 도구를 **RPC 프록시/메타로만** 보유 | traffic **MITM 프록시·SQLite 인덱스·blob 스토어** + traffic_search/get/blob 실행 |
+| 바인딩된 증거 **스냅샷·리포트 렌더링**(영구) | `__artex_traffic_evidence` 로 **증거 원문 바이트 제공**(동기화 시) |
 | 실행계 도구를 **RPC 프록시로만** 보유 | **Bash/파일/WebFetch/Sleep** 실제 실행 |
 
 Agent 바이너리(`cmd/artex-agent`)는 `server`·`db`·`llmpool`·`agentcore` 를 import 조차
@@ -93,7 +98,16 @@ HTTP API 로도 발급·조회할 수 있습니다(로그인 필요):
 | `ARTEX_AGENT_OFFLOAD` | `off`(기본·단일 프로세스 그대로) / `auto`(연결돼 있으면 오프로드) / `require`(샌드박스 필수, 미연결 시 **fail-closed**) |
 
 Agent 측: `--bundle`(또는 `ARTEX_AGENT_BUNDLE`), `--work`, `--egress-proxy`, `--egress-ca`,
-`--reconnect`.
+`--reconnect`, 그리고 traffic 호스팅용:
+
+| 변수/플래그 | 의미 |
+|---|---|
+| `--traffic` / `ARTEX_AGENT_TRAFFIC` | ARTEX 기록 MITM 프록시+증거 스토어를 샌드박스 안에서 호스팅. 켜면 Agent 툴체인(Bash/WebFetch/execsvc)의 egress 가 이 레코더를 통과하므로 모든 target 교환이 샌드박스에서 캡처되고, 제어판은 traffic_search/get/blob 로 조회·`__artex_traffic_evidence` 로 증거를 동기화한다. `--egress-proxy` 를 함께 주면 레코더의 상위 프록시로 체이닝. |
+| `--traffic-addr` / `ARTEX_AGENT_TRAFFIC_ADDR` | 호스팅 레코더 수신 주소(기본 `127.0.0.1:8788`). |
+
+분리 모드에서는 제어판을 `-proxy ""`(로컬 기록 끔)로 띄우고, 기록은 Agent 의 `--traffic`
+가 담당합니다. 제어판의 traffic 조회 도구는 capture 토글이 켜지고 `offload != off` 일 때
+메타데이터로 주입되어 백엔드가 Agent 로 라우팅합니다(미연결 시 fail-closed).
 
 **보안 자세**: 운영에서는 `ARTEX_AGENT_OFFLOAD=require` 를 권장합니다. 이때 Agent 가 없으면
 실행계 도구는 "플랫폼 관리·실행면 미준비" 오류로 **차단**되고, 데이터/그래프 도구(record_fact 등)만
@@ -108,8 +122,15 @@ Agent 로, web_search 는 제어판에 남습니다.
 ## e2e
 
 `e2e/run.sh` 는 바이너리 2종을 빌드하고 `e2e/docker-compose.yml`(postgres+management+
-provision+agent)를 띄운 뒤, 제어판에서 Bash 호출을 **Agent 를 거쳐 mTLS 로** 실행하고
-출력(마커 + Agent 컨테이너 hostname)이 되돌아오는지 검증합니다. LLM 키 불필요.
+provision+agent+target)를 띄운 뒤, 제어판에서 **Agent 를 거쳐 mTLS 로** 다음을 검증합니다
+(LLM 키 불필요):
+
+- Bash 실행(마커 + Agent 컨테이너 hostname 반환),
+- `__artex_dns` 실행 서비스,
+- 샌드박스 트래픽 캡처→조회: Agent 가 자신의 호스팅 레코더를 거쳐 `http://target/` 를
+  fetch 한 뒤 제어판이 `traffic_search` 로 캡처된 교환을 되받음,
+- 증거 동기화: `__artex_traffic_evidence` 로 교환 원문 바이트(base64)를 샌드박스에서 가져옴,
+- 작업 pin/unpin, 미지 도구 거부(negative).
 
 ```bash
 e2e/run.sh            # 빌드·기동·검증·정리
@@ -126,22 +147,26 @@ KEEP=1 e2e/run.sh     # 검증 후 스택 유지(디버깅)
 - ~~커스텀 도구(command/script/http) 실행부를 Agent 로~~ — P2-A/B. 정의·템플릿은 제어판,
   실행만 `execsvc`(db/server 비의존)로 Agent.
 - ~~태스크↔Agent 핀 고정 + 다중 Agent 라우팅~~ — P2-C.
+- ~~traffic MITM 프록시 + SQLite 증거 스토어 + 조회 도구를 Agent 로~~ — P2-D. Agent 가
+  `--traffic` 로 레코더를 호스팅(툴체인 egress 가 통과 → 샌드박스 캡처). 조회 도구는
+  제어판에 메타로 주입되어 백엔드가 Agent 로 라우팅. 바인딩 시점 증거는
+  `__artex_traffic_evidence`(db-free, 모델 비노출)로 제어판에 동기화해 기존 증거 스토어에
+  스냅샷하므로 **리포트 렌더링은 Agent 비의존**. per-body 8MiB 인라인 상한(초과=oversize,
+  truncate 없음). **traffic 패키지의 유일한 Postgres(db) 결합(`db.TemplatePath`)은
+  db-free 복제본으로 제거** — Agent 바이너리가 db 를 링크하지 않는 불변식 유지.
 
 **남은 범위**
 
-1. **traffic MITM 프록시 + SQLite 증거 스토어**를 Agent 로 이전. 현재 분리 모드에서
-   **표적 egress 자체는 이미 샌드박스에서** 일어나며(Agent 의 Bash/WebFetch), 캡처는
-   사용자가 샌드박스에 띄운 기록 프록시(`--egress-proxy`)가 담당합니다. 남은 것은 artex
-   의 traffic **스토어·조회 도구(traffic_search/get/blob)** 를 Agent 로 옮기고, 리포트
-   생성 시점(제어판)에 증거를 동기화하는 것입니다. 보안 요건(위험 작업의 샌드박스 격리)은
-   이미 충족되며, 이는 리포트·증거 기능의 완성도 작업입니다. **분리 모드에서는 제어판을
-   `-proxy ""`(기록 끔)로 띄우고 기록 프록시는 샌드박스에서 운용하세요.**
-2. **Agent 호스팅 MCP(선택적 라우팅)**: 현재 모든 MCP 는 제어판에서 동작합니다(github 등
+1. **Agent 호스팅 MCP(선택적 라우팅)**: 현재 모든 MCP 는 제어판에서 동작합니다(github 등
    제어판 도구에 적합 — Agent 가 MCP 이름을 announce 하지 않으므로 backend 가 래핑하지
    않음). "표적 도구 MCP 를 Agent 에서" 하려면 Agent 가 해당 MCP 클라이언트를 호스팅하고
    그 도구 이름을 announce 하면 됩니다(라우팅 메커니즘은 이미 backend.Executes 로 지원).
    MCP 설정 전달·전송·수명주기를 Agent 에 추가하는 것이 남은 구현입니다.
-3. **인증서 자동 로테이션**(현재는 재프로비저닝) — 선택.
+2. **인증서 자동 로테이션**(현재는 재프로비저닝) — 선택.
+3. **traffic 증거 oversize 처리**(현재 8MiB 초과 본문은 동기화 불가·명시적 오류):
+   `traffic_blob` 레인지 재조립으로 대용량 증거 동기화 — 선택(대부분 증거는 상한 이하).
+   다중 Agent 환경에서 증거는 현재 최신 Agent(`ExecAny`)에서 가져오므로, 캡처 Agent 가
+   여럿일 때 핀 기반 증거 라우팅도 함께 고려.
 
 ## 코드 지도
 
@@ -159,3 +184,13 @@ KEEP=1 e2e/run.sh     # 검증 후 스택 유지(디버깅)
 - `server/engine.go` — `bindExecBackend` 로 planner/worker 실행 컨텍스트에 backend 주입.
 - `server/customtool.go` — command/script/http 커스텀 도구를 backend/execsvc 로 라우팅.
 - `enrich/enrich.go` — `Prober` 인터페이스로 DNS/HTTP 프로브를 Agent 로(로컬 폴백 포함).
+- `traffic/` — 기록 MITM 프록시+SQLite 인덱스+blob 스토어+조회 도구(`traffic.go`).
+  `nkey.go` 는 db-free `templatePath`(Postgres 결합 제거). `RemoteToolMetas` 는 분리
+  모드용 nil-safe 메타. `evidence_service.go` 는 Agent 가 호스팅하는 증거 동기화 서비스
+  `__artex_traffic_evidence`(와이어 타입 공유, 모델 비노출).
+- `evidence/store.go` — `Store.Traffic` 을 `TrafficEvidence` 인터페이스로(로컬=`*traffic.Traffic`,
+  분리 모드=원격 어댑터). 바인딩 시점만 소스를 쓰고 읽기 경로는 영구 스냅샷을 서빙.
+- `server/evidence_remote.go` — `remoteEvidenceSource`: 분리 모드 증거 소스. `ExecAny` 로
+  `__artex_traffic_evidence` 를 id 단위 호출해 EvidenceExchange 재구성.
+- `server/orchestration.go` — `trafficHostTools`: 로컬 레코더 있으면 실도구, 분리 모드면
+  `traffic.RemoteToolMetas` 주입(백엔드가 Agent 로 라우팅).
