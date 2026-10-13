@@ -35,9 +35,28 @@ const (
 )
 
 type job struct {
-	kind jobKind
-	id   int64  // asset id (domain for DNS, site for HTTP)
-	arg  string // host (DNS) or url (HTTP)
+	kind   jobKind
+	id     int64  // asset id (domain for DNS, site for HTTP)
+	arg    string // host (DNS) or url (HTTP)
+	taskID int64  // task that triggered this probe (0 = none); routes to its pinned Agent
+}
+
+type probeTaskKey struct{}
+
+// WithProbeTaskID stamps the task that triggered a probe onto ctx so a sandbox-Agent
+// prober can route the probe to THAT task's pinned Agent, keeping a task's target network
+// I/O on its chosen Agent under the "pinned" posture (보안 리뷰 F10). 0 = no specific task
+// (prober falls back to any connected Agent).
+func WithProbeTaskID(ctx context.Context, taskID int64) context.Context {
+	return context.WithValue(ctx, probeTaskKey{}, taskID)
+}
+
+// ProbeTaskIDFrom returns the task id stamped by WithProbeTaskID, or 0 when none.
+func ProbeTaskIDFrom(ctx context.Context) int64 {
+	if v, ok := ctx.Value(probeTaskKey{}).(int64); ok {
+		return v
+	}
+	return 0
 }
 
 // Engine owns the resolver, the proxy-routed HTTP client, and the worker pool.
@@ -153,10 +172,14 @@ func buildClient(proxy func() string) *http.Client {
 
 // ResolveDomain enqueues a DNS resolution for a domain asset (ungated). host is the
 // FQDN. No-op for an empty engine.
-func (e *Engine) ResolveDomain(id int64, host string) { e.enqueue(job{jobDNS, id, host}) }
+func (e *Engine) ResolveDomain(taskID, id int64, host string) {
+	e.enqueue(job{kind: jobDNS, id: id, arg: host, taskID: taskID})
+}
 
 // ProbeSite enqueues an HTTP probe for a web-asset (site). rawURL is the site URL.
-func (e *Engine) ProbeSite(id int64, rawURL string) { e.enqueue(job{jobHTTP, id, rawURL}) }
+func (e *Engine) ProbeSite(taskID, id int64, rawURL string) {
+	e.enqueue(job{kind: jobHTTP, id: id, arg: rawURL, taskID: taskID})
+}
 
 func (e *Engine) enqueue(j job) {
 	if e == nil || id0(j.id) || j.arg == "" {
@@ -190,9 +213,9 @@ func (e *Engine) worker() {
 			}
 			switch j.kind {
 			case jobDNS:
-				e.doDNS(j.id, j.arg)
+				e.doDNS(j.id, j.arg, j.taskID)
 			case jobHTTP:
-				e.doHTTP(j.id, j.arg)
+				e.doHTTP(j.id, j.arg, j.taskID)
 			}
 		}
 	}
@@ -214,8 +237,8 @@ func itoa(n int64) string { return strconv.FormatInt(n, 10) }
 
 // ---- DNS ----
 
-func (e *Engine) doDNS(id int64, host string) {
-	data := e.resolveDNS(host)
+func (e *Engine) doDNS(id int64, host string, taskID int64) {
+	data := e.resolveDNS(host, taskID)
 	if data == nil {
 		return
 	}
@@ -255,12 +278,12 @@ func (e *Engine) doDNS(id int64, host string) {
 
 var reTitle = regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`)
 
-func (e *Engine) doHTTP(id int64, rawURL string) {
+func (e *Engine) doHTTP(id int64, rawURL string, taskID int64) {
 	host := hostOf(rawURL)
 	if host == "" {
 		return
 	}
-	data := e.probeHTTP(rawURL)
+	data := e.probeHTTP(rawURL, taskID)
 	if data == nil {
 		return
 	}
@@ -276,9 +299,9 @@ func (e *Engine) doHTTP(id int64, rawURL string) {
 // The prober may return ErrProbeLocally to request in-process fallback (offload=auto
 // with no Agent connected); any other error means skip (e.g. offload=require + no Agent,
 // where in-process target I/O is forbidden).
-func (e *Engine) resolveDNS(host string) *DNSData {
+func (e *Engine) resolveDNS(host string, taskID int64) *DNSData {
 	if e.prober != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		ctx, cancel := context.WithTimeout(WithProbeTaskID(context.Background(), taskID), 20*time.Second)
 		d, err := e.prober.ResolveDNS(ctx, host)
 		cancel()
 		if err == nil {
@@ -301,9 +324,9 @@ func (e *Engine) resolveDNS(host string) *DNSData {
 
 // probeHTTP performs the HTTP probe either in a sandboxed Agent or in-process, with the
 // same ErrProbeLocally fallback contract as resolveDNS.
-func (e *Engine) probeHTTP(rawURL string) *HTTPData {
+func (e *Engine) probeHTTP(rawURL string, taskID int64) *HTTPData {
 	if e.prober != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		ctx, cancel := context.WithTimeout(WithProbeTaskID(context.Background(), taskID), 20*time.Second)
 		d, err := e.prober.ProbeHTTP(ctx, rawURL)
 		cancel()
 		if err == nil {

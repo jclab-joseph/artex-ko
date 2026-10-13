@@ -129,12 +129,32 @@ func (p *agentProber) noAgent() error {
 	return errors.New("no sandbox agent for enrich probe")
 }
 
-func (p *agentProber) ResolveDNS(ctx context.Context, host string) (*enrich.DNSData, error) {
+// execProbe runs a probe service on the task's pinned Agent when the ctx carries a task
+// id with a connected pin (keeping a task's target network I/O on its chosen Agent —
+// 보안 리뷰 F10); otherwise on any connected Agent. Returns noAgent() when none is usable.
+func (p *agentProber) execProbe(ctx context.Context, tool string, in json.RawMessage) (*remoteexec.WireResult, error) {
+	if taskID := enrich.ProbeTaskIDFrom(ctx); taskID != 0 {
+		id := strconv.FormatInt(taskID, 10)
+		if agentID, pinned := p.agents.Pins()[id]; pinned {
+			if p.agents.Has(agentID) {
+				return p.agents.Exec(ctx, agentID, tool, in)
+			}
+			// Pinned but its Agent is not connected: in pinned mode the probe must not
+			// silently run on a different sandbox — fail rather than ExecAny.
+			if p.mode == "pinned" {
+				return nil, errors.New("이 작업에 고정된 샌드박스 Agent 가 연결되어 있지 않아 프로브를 실행할 수 없습니다")
+			}
+		}
+	}
 	if !p.agents.HasLive() {
 		return nil, p.noAgent()
 	}
+	return p.agents.ExecAny(ctx, tool, in)
+}
+
+func (p *agentProber) ResolveDNS(ctx context.Context, host string) (*enrich.DNSData, error) {
 	in, _ := json.Marshal(map[string]string{"host": host})
-	res, err := p.agents.ExecAny(ctx, execsvc.ToolDNS, in)
+	res, err := p.execProbe(ctx, execsvc.ToolDNS, in)
 	if err != nil {
 		return nil, err
 	}
@@ -146,11 +166,8 @@ func (p *agentProber) ResolveDNS(ctx context.Context, host string) (*enrich.DNSD
 }
 
 func (p *agentProber) ProbeHTTP(ctx context.Context, rawURL string) (*enrich.HTTPData, error) {
-	if !p.agents.HasLive() {
-		return nil, p.noAgent()
-	}
 	in, _ := json.Marshal(map[string]string{"url": rawURL})
-	res, err := p.agents.ExecAny(ctx, execsvc.ToolHTTPProbe, in)
+	res, err := p.execProbe(ctx, execsvc.ToolHTTPProbe, in)
 	if err != nil {
 		return nil, err
 	}
