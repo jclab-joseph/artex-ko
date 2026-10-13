@@ -7,7 +7,9 @@
 package enrich
 
 import (
+	"context"
 	"crypto/tls"
+	"errors"
 	"html"
 	"io"
 	"log"
@@ -48,7 +50,42 @@ type Engine struct {
 	cool   sync.Map // dedup/cooldown: "kind:id" -> time.Time (last run)
 	once   sync.Once
 	closed chan struct{}
+
+	// prober, when set, performs the DNS/HTTP network I/O in a sandboxed Agent instead
+	// of in-process (execution-plane split). The engine still owns the asset-graph
+	// writes; only the target-facing network calls cross the boundary. nil → in-process
+	// (resolv/client), the monolith behavior.
+	prober Prober
 }
+
+// DNSData / HTTPData are the results a Prober returns, mirroring exactly what the
+// in-process resolver/client would have produced so the asset-graph writes are identical.
+type DNSData struct {
+	A, AAAA, CNAME []string
+}
+
+// HTTPData is the HTTP probe outcome used by the asset-graph writer.
+type HTTPData struct {
+	Status        int
+	ContentLength int64
+	Title         string
+}
+
+// ErrProbeLocally is returned by a Prober to ask the engine to fall back to in-process
+// probing (offload=auto with no Agent connected). Any other error means skip entirely —
+// used under offload=require, where in-process target I/O is forbidden.
+var ErrProbeLocally = errors.New("enrich: probe in-process")
+
+// Prober performs enrich's DNS/HTTP network I/O. The server implements it over the
+// sandboxed-Agent channel; nil keeps the in-process path.
+type Prober interface {
+	ResolveDNS(ctx context.Context, host string) (*DNSData, error)
+	ProbeHTTP(ctx context.Context, rawURL string) (*HTTPData, error)
+}
+
+// SetProber installs (or clears, with nil) the network prober. Safe to call before the
+// engine does any work; wired once at startup by the server.
+func (e *Engine) SetProber(p Prober) { e.prober = p }
 
 const (
 	cooldown    = 5 * time.Minute
@@ -178,11 +215,8 @@ func itoa(n int64) string { return strconv.FormatInt(n, 10) }
 // ---- DNS ----
 
 func (e *Engine) doDNS(id int64, host string) {
-	if e.resolv == nil {
-		return
-	}
-	data, err := e.resolv.QueryMultiple(host)
-	if err != nil || data == nil {
+	data := e.resolveDNS(host)
+	if data == nil {
 		return
 	}
 	ips := uniq(append(append([]string{}, data.A...), data.AAAA...))
@@ -226,26 +260,72 @@ func (e *Engine) doHTTP(id int64, rawURL string) {
 	if host == "" {
 		return
 	}
+	data := e.probeHTTP(rawURL)
+	if data == nil {
+		return
+	}
+	_, _ = e.as.UpsertHTTPService(db.UpsertHTTPServiceReq{
+		URL:           rawURL,
+		StatusCode:    &data.Status,
+		ContentLength: &data.ContentLength,
+		PageTitle:     data.Title,
+	})
+}
+
+// resolveDNS performs the DNS lookup either in a sandboxed Agent (prober) or in-process.
+// The prober may return ErrProbeLocally to request in-process fallback (offload=auto
+// with no Agent connected); any other error means skip (e.g. offload=require + no Agent,
+// where in-process target I/O is forbidden).
+func (e *Engine) resolveDNS(host string) *DNSData {
+	if e.prober != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		d, err := e.prober.ResolveDNS(ctx, host)
+		cancel()
+		if err == nil {
+			return d
+		}
+		if err != ErrProbeLocally {
+			return nil
+		}
+		// fall through to in-process
+	}
+	if e.resolv == nil {
+		return nil
+	}
+	raw, err := e.resolv.QueryMultiple(host)
+	if err != nil || raw == nil {
+		return nil
+	}
+	return &DNSData{A: raw.A, AAAA: raw.AAAA, CNAME: raw.CNAME}
+}
+
+// probeHTTP performs the HTTP probe either in a sandboxed Agent or in-process, with the
+// same ErrProbeLocally fallback contract as resolveDNS.
+func (e *Engine) probeHTTP(rawURL string) *HTTPData {
+	if e.prober != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		d, err := e.prober.ProbeHTTP(ctx, rawURL)
+		cancel()
+		if err == nil {
+			return d
+		}
+		if err != ErrProbeLocally {
+			return nil
+		}
+		// fall through to in-process
+	}
 	req, err := http.NewRequest("GET", rawURL, nil)
 	if err != nil {
-		return
+		return nil
 	}
 	req.Header.Set("User-Agent", "artex-enrich/1.0")
 	resp, err := e.client.Do(req)
 	if err != nil {
-		return
+		return nil
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20)) // cap 1 MiB
-	statusCode := resp.StatusCode
-	bodyLen := int64(len(body))
-	title := extractTitle(body)
-	_, _ = e.as.UpsertHTTPService(db.UpsertHTTPServiceReq{
-		URL:           rawURL,
-		StatusCode:    &statusCode,
-		ContentLength: &bodyLen,
-		PageTitle:     title,
-	})
+	return &HTTPData{Status: resp.StatusCode, ContentLength: int64(len(body)), Title: extractTitle(body)}
 }
 
 func extractTitle(body []byte) string {

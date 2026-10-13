@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Autumn-27/artex/execsvc"
 	"github.com/Autumn-27/artex/remoteexec"
 )
 
@@ -70,6 +71,10 @@ func run() int {
 	// proxy when one is configured, so target traffic is captured where it happens.
 	bashEnv := remoteexec.EgressEnv(*egressProxy, *egressCA)
 	tools := remoteexec.DefaultAgentTools(*egressProxy, *egressCA, false)
+	// db-free execution services: custom script/http tools and the enrich asset-probe
+	// pool run their process/network I/O here in the sandbox, invoked programmatically
+	// by the control plane over the same channel (not shown to the model).
+	tools = append(tools, execsvc.Tools(*egressProxy, *egressCA)...)
 	exec := remoteexec.NewExecutor(tools, absWork, bashEnv)
 
 	log.Printf("[agent] id=%s mode=%s address=%s work=%s tools=%v",

@@ -258,6 +258,24 @@ func (m *Manager) Exec(ctx context.Context, agentID, tool string, input json.Raw
 	return a.sess.Call(ctx, tool, input, &remoteexec.WireToolCtx{WorkingDir: "diag"}, nil)
 }
 
+// ExecAny runs one tool on the most-recently connected Agent — used by process-global
+// consumers (the enrich pool) that are not bound to a specific task/agent. Returns an
+// error when no Agent is connected.
+func (m *Manager) ExecAny(ctx context.Context, tool string, input json.RawMessage) (*remoteexec.WireResult, error) {
+	m.mu.RLock()
+	var newest *Agent
+	for _, a := range m.agents {
+		if newest == nil || a.ConnectedAt.After(newest.ConnectedAt) {
+			newest = a
+		}
+	}
+	m.mu.RUnlock()
+	if newest == nil {
+		return nil, errors.New("agentctl: no agent connected")
+	}
+	return newest.sess.Call(ctx, tool, input, &remoteexec.WireToolCtx{WorkingDir: "enrich"}, nil)
+}
+
 // List returns a snapshot of live agents (no secrets).
 func (m *Manager) List() []Agent {
 	m.mu.RLock()

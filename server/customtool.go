@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/Autumn-27/artex/db"
+	"github.com/Autumn-27/artex/execsvc"
 	"github.com/Autumn-27/artex/remoteexec"
 	"github.com/Autumn-27/norma/permission"
 	actool "github.com/Autumn-27/norma/tool"
@@ -373,6 +374,15 @@ func (s *Server) runScriptTool(ctx context.Context, key string, execRaw json.Raw
 	if strings.TrimSpace(spec.Code) == "" {
 		return actool.Errorf("script code 为空"), nil
 	}
+	// 执行面分离:샌드박스 Agent 가 붙어 있으면 스크립트 실행을 Agent 로 넘긴다(인터프리터
+	// 선호값만 전달; 실제 실행·인터프리터 탐색은 Agent 가 수행). 미연결/단일 프로세스면 아래
+	// 로컬 경로 그대로.
+	if be := remoteexec.BackendFrom(ctx); be.IsRemote() && be.Executes(execsvc.ToolScript) {
+		in, _ := json.Marshal(execsvc.ScriptInput{
+			Interp: s.pythonInterpreter(), Code: spec.Code, Params: params, Key: key, TimeoutMs: spec.TimeoutMs,
+		})
+		return be.Wrap(execsvc.ScriptTool()).Call(ctx, in, tc)
+	}
 	interp := s.pythonInterpreter()
 	if interp == "" {
 		return actool.Errorf("未配置且未检测到 python 解释器(在系统配置里设置)"), nil
@@ -446,6 +456,23 @@ func (s *Server) runHTTPTool(ctx context.Context, execRaw json.RawMessage, param
 	rawURL := renderTemplate(spec.URL, params, identity)
 	if strings.TrimSpace(rawURL) == "" {
 		return actool.Errorf("http url 为空"), nil
+	}
+	// 执行面分离: Agent 가 붙어 있으면 HTTP 요청을 Agent 에서 보낸다. use_recording_proxy
+	// 는 Agent 가 자신의 로컬 기록 프록시로 해석한다(제어판 프록시 주소를 넘기지 않음).
+	if be := remoteexec.BackendFrom(ctx); be.IsRemote() && be.Executes(execsvc.ToolHTTP) {
+		hdrs := map[string]string{}
+		for k, v := range spec.Headers {
+			hdrs[k] = renderTemplate(v, params, identity)
+		}
+		body := ""
+		if spec.Body != "" {
+			body = renderTemplate(spec.Body, params, identity)
+		}
+		in, _ := json.Marshal(execsvc.HTTPInput{
+			Method: spec.Method, URL: rawURL, Headers: hdrs, Body: body,
+			TimeoutMs: spec.TimeoutMs, Proxy: strings.TrimSpace(spec.Proxy), UseRecordingProxy: spec.UseRecordingProxy,
+		})
+		return be.Wrap(execsvc.HTTPTool("", "")).Call(ctx, in, tc)
 	}
 	var bodyReader io.Reader
 	if spec.Body != "" {

@@ -3,12 +3,15 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"os"
 	"strings"
 
 	"github.com/Autumn-27/artex/agentctl"
+	"github.com/Autumn-27/artex/enrich"
+	"github.com/Autumn-27/artex/execsvc"
 	"github.com/Autumn-27/artex/remoteexec"
 )
 
@@ -62,6 +65,71 @@ func (s *Server) initAgentControl(ctx context.Context, dataDir string) {
 	s.engine.SetExecBackendResolver(func(t *Task) remoteexec.Backend {
 		return s.resolveExecBackend(t, mode)
 	})
+
+	// enrich(DNS/HTTP 자산 프로브)의 네트워크 I/O 도 표적 지향이므로 Agent 로 보낸다.
+	// off = 종전대로 in-process. auto/require = Agent 사용(require 는 미연결 시 skip).
+	if mode != "off" && s.m != nil && s.m.enrich != nil {
+		s.m.enrich.SetProber(&agentProber{agents: mgr, mode: mode})
+	}
+}
+
+// agentProber implements enrich.Prober by running the sandbox's __artex_dns /
+// __artex_httpprobe services over the agent channel. It owns the offload semantics:
+// no Agent + auto → ErrProbeLocally (in-process fallback); no Agent + require → a hard
+// error so no target I/O happens on the control plane.
+type agentProber struct {
+	agents *agentctl.Manager
+	mode   string
+}
+
+func (p *agentProber) noAgent() error {
+	if p.mode == "auto" {
+		return enrich.ErrProbeLocally
+	}
+	return errors.New("no sandbox agent for enrich probe")
+}
+
+func (p *agentProber) ResolveDNS(ctx context.Context, host string) (*enrich.DNSData, error) {
+	if !p.agents.HasLive() {
+		return nil, p.noAgent()
+	}
+	in, _ := json.Marshal(map[string]string{"host": host})
+	res, err := p.agents.ExecAny(ctx, execsvc.ToolDNS, in)
+	if err != nil {
+		return nil, err
+	}
+	var out execsvc.DNSResult
+	if e := json.Unmarshal([]byte(resultText(res)), &out); e != nil {
+		return nil, e
+	}
+	return &enrich.DNSData{A: out.A, AAAA: out.AAAA, CNAME: out.CNAME}, nil
+}
+
+func (p *agentProber) ProbeHTTP(ctx context.Context, rawURL string) (*enrich.HTTPData, error) {
+	if !p.agents.HasLive() {
+		return nil, p.noAgent()
+	}
+	in, _ := json.Marshal(map[string]string{"url": rawURL})
+	res, err := p.agents.ExecAny(ctx, execsvc.ToolHTTPProbe, in)
+	if err != nil {
+		return nil, err
+	}
+	var out execsvc.ProbeResult
+	if e := json.Unmarshal([]byte(resultText(res)), &out); e != nil {
+		return nil, e
+	}
+	return &enrich.HTTPData{Status: out.Status, ContentLength: out.ContentLength, Title: out.Title}, nil
+}
+
+func resultText(res *remoteexec.WireResult) string {
+	if res == nil {
+		return ""
+	}
+	var s string
+	for _, b := range res.Content {
+		s += b.Text
+	}
+	return s
 }
 
 // resolveExecBackend picks a task's execution backend per the offload policy. Per-task

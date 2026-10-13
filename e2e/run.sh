@@ -104,6 +104,22 @@ assert '$MARKER' in d.get('output',''), 'marker not in output: %r' % d
 print('assertion passed: output contains $MARKER, is_error=%s' % d.get('is_error'))
 " || fail "execution assertion failed"
 
+# 7b. Exercise an execution SERVICE (the enrich DNS prober) in the sandbox. Asserts the
+#     service ran and returned a well-formed result (not that any record resolved, so the
+#     check does not depend on outbound DNS being reachable).
+say "Executing the DNS service (__artex_dns) in the sandbox"
+DNSRESP="$(curl -fsS "${AUTH[@]}" -X POST "$MGMT_URL/api/exec-agents/$AGENT_ID/exec" \
+  -H 'Content-Type: application/json' \
+  -d '{"tool":"__artex_dns","input":{"host":"example.com"}}')"
+echo "$DNSRESP" | python3 -m json.tool
+echo "$DNSRESP" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+assert d.get('is_error') is not True, 'dns service errored: %r' % d
+json.loads(d.get('output','') or '{}')  # output must be valid JSON {a,aaaa,cname}
+print('assertion passed: __artex_dns ran in the sandbox and returned JSON')
+" || fail "dns service assertion failed"
+
 # 8. Negative check: an unknown tool must be rejected by the agent.
 say "Negative check: unknown tool is rejected"
 BADCODE="$(curl -s -o /dev/null -w '%{http_code}' "${AUTH[@]}" -X POST "$MGMT_URL/api/exec-agents/$AGENT_ID/exec" \
