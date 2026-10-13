@@ -3910,6 +3910,12 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 			// taskDir = agent 的工作目录(CWD),与 chatUpload 落盘、ensureRunDir 一致。
 			taskDir := filepath.Join(s.m.dir, "tasks", t.ID)
 			agentMsg := composeAgentMessage(agentMessage, req.Attachments, taskDir)
+			// Execution-plane split: the task's main-agent chat runs Bash/WebFetch etc.,
+			// so bind the task's execution backend — the same routing/fail-closed policy
+			// as planner/worker. In pinned mode this honors the task's selected Agent; with
+			// none connected the exec tools block instead of running on the control plane
+			// (보안 리뷰 F2). No-op in off mode / when agent control is disabled.
+			ctx = s.bindExecCtx(ctx, t)
 			s.engine.BeginLLMCall(t.ID)
 			_, err := ma.Chat(ctx, maTaskID, mainSeg, s.m.Assets(), t.Store, t.Goal, agentMsg, emit, t.Notify, resume, t.NotifyGoal, t.NotifyHint)
 			s.engine.EndLLMCall(t.ID)

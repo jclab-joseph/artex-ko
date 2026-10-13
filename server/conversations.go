@@ -619,6 +619,12 @@ func (s *Server) runConversationTurn(ctx context.Context, cancel context.CancelC
 			log.Printf("[conv %d] append activity failed: %v", c.ID, err)
 		}
 	}
+	// Execution-plane split: a conversation is a full tool-using agent (Bash/WebFetch),
+	// so its tool calls must obey the sandbox-offload policy exactly like a task run.
+	// Conversations have no Agent selection, so pinned/require with no connected Agent
+	// fails closed (exec tools blocked; the conversation itself still answers) — 보안
+	// 리뷰 F2. Taskless → nil. No-op in off mode / when agent control is disabled.
+	ctx = s.bindExecCtx(ctx, nil)
 	// On a manual stop ctx is cancelled; Chat already emits a clean "已手动停止"
 	// step, so skip the raw-error entry — only surface genuine failures.
 	if _, err := ca.Chat(ctx, c.AgentKey, sessionID, msg, maxTurns, maxDuration, webSearch, emit); err != nil {
