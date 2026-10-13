@@ -132,6 +132,52 @@ const (
 // and the catalog migration cannot drift apart.
 const TrafficSearchDescription = "查询记录代理已抓取的目标流量（必须指定 host；支持裸主机、主机:端口或完整 URL，可再按 URL 子串或正文关键词过滤）。指定端口时只返回该服务的流量，避免同一 IP 的不同端口串包。body_contains 会在已抓取的请求/响应头与正文中做全文搜索，支持任意子串和中文（至少 3 个字符）。仅返回极轻量索引(id/method/url/status/resp_len)，不含响应内容；结果非空后必须用 traffic_get 逐条核实请求/响应，再把确实支持当前漏洞的 ID 交给 bind_finding_traffic。默认只返回 3 条、每页最多 10 条；结果多时用 page 翻页。"
 
+// TrafficGetDescription / TrafficBlobDescription are the catalog descriptions for
+// the other two query tools. Kept as package constants (like the search one) so the
+// locally-hosted tools (Tools) and the Management-side remote metadata placeholders
+// (RemoteToolMetas) present the model one identical surface, split mode or not.
+const TrafficGetDescription = "按 id 取一条已抓流量的请求/响应原文（过大会截断）。配合 traffic_search 用，避免重复 curl。"
+
+const TrafficBlobDescription = "分段读取超大请求/响应体的原文。traffic_get 里显示为 '…[truncated] @blob sha256:<hash>' 的部分即存放于此，把该 hash 传进来即可取完整内容。单次最多返回 8KB，用 offset 继续往后读（返回结果会给出总长度）。适合翻阅备份文件、源码泄露、大 JSON 导出等超过内联阈值的响应。"
+
+// trafficSearchSchema / trafficGetSchema / trafficBlobSchema are the input schemas
+// for the three query tools, built fresh per call (callers may mutate the maps). A
+// single definition keeps the locally-hosted tool and the remote placeholder in
+// lockstep, so the schema the model sees always matches what the Agent enforces.
+func trafficSearchSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"host":          map[string]any{"type": "string", "description": "按主机过滤（必填；如 '107.172.96.177'、'107.172.96.177:8082' 或 'http://107.172.96.177:8082/path'）"},
+			"contains":      map[string]any{"type": "string", "description": "URL 子串过滤（可选，如 'api' / 'login'）"},
+			"body_contains": map[string]any{"type": "string", "description": "正文全文搜索（可选，至少 3 个字符），匹配请求/响应的头与正文，如 'password' / 'root:x:0' / '内网测试'"},
+			"limit":         map[string]any{"type": "integer", "description": "每页条数，默认 3，最大 10"},
+			"page":          map[string]any{"type": "integer", "description": "页码，从 0 开始，默认 0（按 ts 倒序分页）"},
+		},
+		"required": []any{"host"},
+	}
+}
+
+func trafficGetSchema() map[string]any {
+	return map[string]any{
+		"type":       "object",
+		"properties": map[string]any{"id": map[string]any{"type": "string", "description": "traffic_search 返回的 id"}},
+		"required":   []any{"id"},
+	}
+}
+
+func trafficBlobSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"hash":   map[string]any{"type": "string", "description": "traffic_get 中 @blob sha256: 后面的 64 位十六进制值"},
+			"offset": map[string]any{"type": "integer", "description": "起始字节偏移，默认 0"},
+			"length": map[string]any{"type": "integer", "description": "本次读取字节数，默认且最大 8192"},
+		},
+		"required": []any{"hash"},
+	}
+}
+
 // Traffic runs the recording proxy and owns the file tree + index.
 type Traffic struct {
 	dir   string
@@ -2005,17 +2051,7 @@ func (t *Traffic) Tools() []actool.CoreTool {
 	search := actool.Build(actool.Spec{
 		Name:        "traffic_search",
 		Description: TrafficSearchDescription,
-		Schema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"host":          map[string]any{"type": "string", "description": "按主机过滤（必填；如 '107.172.96.177'、'107.172.96.177:8082' 或 'http://107.172.96.177:8082/path'）"},
-				"contains":      map[string]any{"type": "string", "description": "URL 子串过滤（可选，如 'api' / 'login'）"},
-				"body_contains": map[string]any{"type": "string", "description": "正文全文搜索（可选，至少 3 个字符），匹配请求/响应的头与正文，如 'password' / 'root:x:0' / '内网测试'"},
-				"limit":         map[string]any{"type": "integer", "description": "每页条数，默认 3，最大 10"},
-				"page":          map[string]any{"type": "integer", "description": "页码，从 0 开始，默认 0（按 ts 倒序分页）"},
-			},
-			"required": []any{"host"},
-		},
+		Schema:      trafficSearchSchema(),
 		ReadOnly:    ro,
 		Permissions: allow,
 		Run: func(_ context.Context, in json.RawMessage, _ *actool.ToolContext) (actool.Result, error) {
@@ -2055,12 +2091,8 @@ func (t *Traffic) Tools() []actool.CoreTool {
 
 	get := actool.Build(actool.Spec{
 		Name:        "traffic_get",
-		Description: "按 id 取一条已抓流量的请求/响应原文（过大会截断）。配合 traffic_search 用，避免重复 curl。",
-		Schema: map[string]any{
-			"type":       "object",
-			"properties": map[string]any{"id": map[string]any{"type": "string", "description": "traffic_search 返回的 id"}},
-			"required":   []any{"id"},
-		},
+		Description: TrafficGetDescription,
+		Schema:      trafficGetSchema(),
 		ReadOnly:    ro,
 		Permissions: allow,
 		Run: func(_ context.Context, in json.RawMessage, _ *actool.ToolContext) (actool.Result, error) {
@@ -2076,16 +2108,8 @@ func (t *Traffic) Tools() []actool.CoreTool {
 
 	blob := actool.Build(actool.Spec{
 		Name:        "traffic_blob",
-		Description: "分段读取超大请求/响应体的原文。traffic_get 里显示为 '…[truncated] @blob sha256:<hash>' 的部分即存放于此，把该 hash 传进来即可取完整内容。单次最多返回 8KB，用 offset 继续往后读（返回结果会给出总长度）。适合翻阅备份文件、源码泄露、大 JSON 导出等超过内联阈值的响应。",
-		Schema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"hash":   map[string]any{"type": "string", "description": "traffic_get 中 @blob sha256: 后面的 64 位十六进制值"},
-				"offset": map[string]any{"type": "integer", "description": "起始字节偏移，默认 0"},
-				"length": map[string]any{"type": "integer", "description": "本次读取字节数，默认且最大 8192"},
-			},
-			"required": []any{"hash"},
-		},
+		Description: TrafficBlobDescription,
+		Schema:      trafficBlobSchema(),
 		ReadOnly:    ro,
 		Permissions: allow,
 		Run: func(_ context.Context, in json.RawMessage, _ *actool.ToolContext) (actool.Result, error) {
@@ -2120,6 +2144,34 @@ func (t *Traffic) Tools() []actool.CoreTool {
 // tools catalog (metadata only — Name/Description/InputSchema). The handlers close
 // over the nil receiver but are never invoked on this instance, so it is safe.
 func SeedToolMetas() []actool.CoreTool { return (&Traffic{}).Tools() }
+
+// RemoteToolMetas returns metadata-only placeholders for the three query tools, for
+// Management to inject when the traffic store is hosted by a sandboxed Agent (split
+// mode: Management has no local *Traffic). They carry the real Name/Description/
+// Schema so the model sees an identical surface, but their Call fails closed —
+// RemoteBackend.Wrap swaps Call for the Agent RPC proxy when the Agent announces
+// traffic_*, and if a tool is ever left unwrapped (no Agent) it returns a clear
+// error instead of touching a nil store. Safe by construction, unlike SeedToolMetas.
+func RemoteToolMetas() []actool.CoreTool {
+	allow := func(context.Context, json.RawMessage, permission.Context) permission.Decision {
+		return permission.Allowed()
+	}
+	ro := func(json.RawMessage) bool { return true }
+	notReady := func(_ context.Context, _ json.RawMessage, _ *actool.ToolContext) (actool.Result, error) {
+		return actool.Errorf("【ARTEX 平台管控·执行面未就绪】流量记录运行在隔离沙箱 Agent 中，但当前没有启用流量记录的 Agent（Agent 未连接，或未以 --traffic 开启记录）；连接并开启后重试。"), nil
+	}
+	mk := func(name, desc string, schema map[string]any) actool.CoreTool {
+		return actool.Build(actool.Spec{
+			Name: name, Description: desc, Schema: schema,
+			ReadOnly: ro, Permissions: allow, Run: notReady,
+		})
+	}
+	return []actool.CoreTool{
+		mk("traffic_search", TrafficSearchDescription, trafficSearchSchema()),
+		mk("traffic_get", TrafficGetDescription, trafficGetSchema()),
+		mk("traffic_blob", TrafficBlobDescription, trafficBlobSchema()),
+	}
+}
 
 func clip(s string, max int) string {
 	if len(s) <= max {

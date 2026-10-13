@@ -70,12 +70,23 @@ services:
       - shared:/shared
     restart: "no"
 
+  # A trivial in-network HTTP target the sandboxed Agent can reach. Stands in for a
+  # pentest target; it exists only so the Agent's hosted recorder captures a real
+  # exchange that Management can then query via traffic_search over the channel.
+  target:
+    image: nginx:alpine
+    restart: unless-stopped
+
   agent:
     image: artex-e2e:local
     depends_on:
       provision:
         condition: service_completed_successfully
-    command: ["artex-agent", "--bundle", "/shared/bundle.json", "--work", "/work"]
+    # --traffic: host ARTEX's recording MITM proxy + evidence store IN the sandbox.
+    # The Agent's own Bash/WebFetch egress is routed through it, so every target
+    # exchange is captured where the dangerous I/O happens — never on the control
+    # plane — and Management inspects it via traffic_search/get/blob over mTLS.
+    command: ["artex-agent", "--bundle", "/shared/bundle.json", "--work", "/work", "--traffic", "--traffic-addr", "127.0.0.1:8788"]
     volumes:
       - shared:/shared
     restart: unless-stopped

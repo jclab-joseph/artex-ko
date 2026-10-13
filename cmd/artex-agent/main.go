@@ -17,11 +17,13 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/Autumn-27/artex/execsvc"
 	"github.com/Autumn-27/artex/remoteexec"
+	"github.com/Autumn-27/artex/traffic"
 )
 
 // version is injected at release time via -ldflags "-X main.version=<tag>".
@@ -35,6 +37,8 @@ func run() int {
 		workDir     = flag.String("work", envOr("ARTEX_AGENT_WORK", "/work"), "sandbox working directory root where all tool files land")
 		egressProxy = flag.String("egress-proxy", envOr("ARTEX_AGENT_EGRESS_PROXY", ""), "optional egress proxy for Bash/WebFetch child commands (e.g. http://127.0.0.1:8788)")
 		egressCA    = flag.String("egress-ca", envOr("ARTEX_AGENT_EGRESS_CA", ""), "optional PEM CA path the toolchain trusts for the egress proxy's re-signed HTTPS")
+		trafficOn   = flag.Bool("traffic", envTrue("ARTEX_AGENT_TRAFFIC"), "host ARTEX's recording MITM proxy + evidence store in the sandbox (serves traffic_search/get/blob); the toolchain egresses through it")
+		trafficAddr = flag.String("traffic-addr", envOr("ARTEX_AGENT_TRAFFIC_ADDR", "127.0.0.1:8788"), "listen address for the hosted recording proxy when --traffic is set")
 		retry       = flag.Duration("reconnect", 5*time.Second, "reconnect backoff when the control-plane connection drops (agent-dials mode)")
 	)
 	flag.Parse()
@@ -67,6 +71,40 @@ func run() int {
 		return 2
 	}
 
+	// Optionally host ARTEX's own recording MITM proxy + evidence store here in the
+	// sandbox (split mode). When on, it BECOMES the toolchain's egress proxy so every
+	// target exchange is captured where the dangerous I/O happens, and the control
+	// plane queries it over the same channel via traffic_search/get/blob. The evidence
+	// store (SQLite index + blob tree) never leaves the sandbox until report time.
+	var tr *traffic.Traffic
+	if *trafficOn {
+		var err error
+		if tr, err = traffic.Open(filepath.Join(absWork, "_traffic"), *trafficAddr); err != nil {
+			log.Printf("[agent] 트래픽 레코더를 열지 못했습니다(%s): %v", *trafficAddr, err)
+			return 2
+		}
+		go func() {
+			if err := tr.Start(); err != nil {
+				log.Printf("[agent] 트래픽 레코더 종료: %v", err)
+			}
+		}()
+		defer tr.Close()
+		// If the user also gave an explicit egress proxy, chain it as the recorder's
+		// upstream so captured requests still exit through it; then point the toolchain
+		// at the local recorder (which re-signs HTTPS with its own CA).
+		if *egressProxy != "" {
+			if err := tr.SetUpstreamProxy(*egressProxy); err != nil {
+				log.Printf("[agent] 상위 프록시 설정 실패(%s): %v", *egressProxy, err)
+				return 2
+			}
+			log.Printf("[agent] 트래픽 레코더 상위 프록시=%s", *egressProxy)
+		}
+		*egressProxy = tr.ProxyAddr()
+		*egressCA = tr.CACertPath()
+		waitForFile(*egressCA, 5*time.Second) // CA is written on first proxy start
+		log.Printf("[agent] 트래픽 레코더 on: %s (store=%s)", tr.ProxyAddr(), filepath.Join(absWork, "_traffic"))
+	}
+
 	// Build the execution tool set. WebFetch and Bash both egress through the local
 	// proxy when one is configured, so target traffic is captured where it happens.
 	bashEnv := remoteexec.EgressEnv(*egressProxy, *egressCA)
@@ -75,6 +113,11 @@ func run() int {
 	// pool run their process/network I/O here in the sandbox, invoked programmatically
 	// by the control plane over the same channel (not shown to the model).
 	tools = append(tools, execsvc.Tools(*egressProxy, *egressCA)...)
+	// When hosting the recorder, expose its query tools so Management can inspect the
+	// captured evidence over the channel (traffic_search/traffic_get/traffic_blob).
+	if tr != nil {
+		tools = append(tools, tr.Tools()...)
+	}
 	exec := remoteexec.NewExecutor(tools, absWork, bashEnv)
 
 	log.Printf("[agent] id=%s mode=%s address=%s work=%s tools=%v",
@@ -135,6 +178,28 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// envTrue reads a boolean-ish env var (1/true/yes/on, case-insensitive) as a flag
+// default. Anything else — including unset — is false.
+func envTrue(key string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(key))) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
+}
+
+// waitForFile polls for a path to appear, up to d. Used to let go-mitmproxy write
+// its CA on first start before the first child command needs to trust it.
+func waitForFile(path string, d time.Duration) {
+	deadline := time.Now().Add(d)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 func orNone(s string) string {

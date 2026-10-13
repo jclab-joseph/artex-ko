@@ -120,6 +120,41 @@ json.loads(d.get('output','') or '{}')  # output must be valid JSON {a,aaaa,cnam
 print('assertion passed: __artex_dns ran in the sandbox and returned JSON')
 " || fail "dns service assertion failed"
 
+# 7b-traffic. Prove the recording store is HOSTED IN THE SANDBOX: make the Agent fetch
+#   a target through its own hosted recorder (Bash+curl egress → recorder → target),
+#   then drive traffic_search from Management THROUGH the Agent and assert the captured
+#   exchange comes back. Both the capture and the query happen only in the sandbox.
+say "Capturing a target exchange in the sandbox, then querying it via traffic_search"
+CAP="$(curl -fsS "${AUTH[@]}" -X POST "$MGMT_URL/api/exec-agents/$AGENT_ID/exec" \
+  -H 'Content-Type: application/json' \
+  -d '{"tool":"Bash","input":{"command":"curl -s -o /dev/null -w %{http_code} http://target/"}}')"
+echo "$CAP" | python3 -m json.tool
+echo "$CAP" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+assert d.get('is_error') is not True, 'capture curl errored: %r' % d
+assert '200' in d.get('output',''), 'target fetch did not return 200: %r' % d
+print('assertion passed: Agent fetched http://target/ through its hosted recorder')
+" || fail "sandbox capture fetch failed"
+
+# Give the recorder a moment to flush the exchange to its index, then query it.
+for i in $(seq 1 15); do
+  TS="$(curl -fsS "${AUTH[@]}" -X POST "$MGMT_URL/api/exec-agents/$AGENT_ID/exec" \
+    -H 'Content-Type: application/json' \
+    -d '{"tool":"traffic_search","input":{"host":"target"}}')"
+  if echo "$TS" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+sys.exit(0 if (d.get('is_error') is not True and 'target' in d.get('output','') and d.get('output','').strip() not in ('', '无匹配流量。')) else 1)
+" 2>/dev/null; then
+    echo "$TS" | python3 -m json.tool
+    ok "traffic_search returned the sandbox-captured exchange"
+    break
+  fi
+  [[ $i == 15 ]] && { echo "$TS" | python3 -m json.tool; fail "traffic_search never returned the captured exchange"; }
+  sleep 1
+done
+
 # 7c. Per-task Agent pinning API (multi-agent routing).
 say "Pinning a task to the agent, then unpinning"
 PINCODE="$(curl -s -o /dev/null -w '%{http_code}' "${AUTH[@]}" -X POST "$MGMT_URL/api/exec-agents/$AGENT_ID/pin" \
