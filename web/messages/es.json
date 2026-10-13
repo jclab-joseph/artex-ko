@@ -177,7 +177,8 @@
       "tasks": "Tareas",
       "tools": "Herramientas",
       "traffic": "Tráfico",
-      "workspace": "Espacio de trabajo"
+      "workspace": "Espacio de trabajo",
+      "exec-agents": "Agent de ejecución"
     }
   },
   "notFound": {
@@ -1916,6 +1917,9 @@
     "argsLabel": "Argumentos (separados por espacios)",
     "urlLabel": "URL remota",
     "insecureLabel": "Omitir la verificación del certificado TLS (certificados autofirmados)",
+    "agentHostedLabel": "Alojar en el Agent de la zona aislada (separación del plano de ejecución)",
+    "agentHostedHint": "Cuando está activo, este servidor MCP se ejecuta en el Agent de la zona aislada en lugar del plano de control. La configuración se toma como instantánea al emitir un paquete de conexión, así que vuelve a emitirlo tras cambiarla. Una zona aislada sin internet no puede alcanzar servidores http/sse externos: usa stdio (un proceso dentro de la zona) o un endpoint de su red. Mantén los MCP SaaS externos (p. ej. GitHub) desactivados y en el plano de control.",
+    "agentHostedBadge": "En el Agent",
     "headersLabel": "Encabezados de solicitud (KEY=VALUE por línea, p. ej. Authorization=Bearer xxx)",
     "envLabel": "Variables de entorno (KEY=VALUE por línea)",
     "refresh": "Actualizar",
@@ -3215,6 +3219,10 @@
       "title": "Idioma de la interfaz",
       "desc": "El idioma del texto en pantalla y de los informes, resúmenes y respuestas de chat que escriben los agentes. Se aplica de inmediato, sin necesidad de guardar. El idioma de la pantalla se guarda solo en este navegador, por lo que deberá elegirlo de nuevo si cambia de navegador o borra los datos del sitio. El idioma de salida de los agentes se guarda en el servidor y se aplica desde cualquier navegador.",
       "label": "Idioma"
+    },
+    "splitNote": {
+      "capture": "Modo separado (offload={mode}). La grabación de tráfico corre en el Agent de la zona aislada (artex-agent --traffic); este interruptor controla si las herramientas de consulta de tráfico anunciadas por el Agent se exponen al modelo. Ejecuta el plano de control con -proxy \"\" en modo separado.",
+      "proxy": "En modo separado (offload={mode}) este ajuste de proxy global no tiene efecto. Define el proxy de salida en el Agent con --egress-proxy al arrancar."
     }
   },
   "llmPage": {
@@ -3744,6 +3752,61 @@
     "retester": {
       "name": "Reverificación de vulnerabilidad",
       "description": "Se inicia manualmente desde el detalle de un hallazgo; lee la evidencia original y guarda una conclusión de reverificación independiente."
+    }
+  },
+  "execAgentsPage": {
+    "title": "Agents de ejecución (zona aislada)",
+    "subtitle": "Agents del plano de ejecución que corren herramientas peligrosas en una zona aislada sin internet. Distintos de las personas LLM bajo «Agent».",
+    "refresh": "Actualizar",
+    "loadFailed": "Fallo al cargar: {msg}",
+    "actionFailed": "Acción fallida: {msg}",
+    "disabledTitle": "La separación del plano de ejecución está desactivada",
+    "disabledHint": "Actívala en el servidor con ARTEX_AGENT_LISTEN (dirección donde los Agents se conectan) o ARTEX_AGENT_OFFLOAD (auto|require). Con el valor por defecto (off), todas las herramientas corren en el plano de control.",
+    "postureTitle": "Postura de ejecución",
+    "connectedCount": "{count} Agent(s) conectados",
+    "listenAddr": "Dirección de escucha",
+    "listenNone": "(sin escucha · los Agents no se conectan)",
+    "offload": {
+      "off": "off (proceso único)",
+      "auto": "auto (descarga si hay)",
+      "require": "require (zona aislada obligatoria)",
+      "offHint": "Por defecto. Todas las herramientas corren en el plano de control (igual que antes de la separación).",
+      "autoHint": "Descarga las herramientas de ejecución a un Agent conectado si lo hay; si no, usa el local.",
+      "requireHint": "Postura segura. Las herramientas de ejecución DEBEN correr en una zona aislada; fail-closed (bloqueado) si no hay Agent."
+    },
+    "issueBundle": "Emitir paquete de conexión",
+    "issueBundleDesc": "Emite y descarga un paquete de conexión (JSON) para un nuevo Agent. Ejecútalo en tu zona aislada con artex-agent --bundle <archivo>. ARTEX solo produce el paquete; tú lanzas la zona aislada.",
+    "errNoAddress": "Introduce una dirección",
+    "bundleDownloaded": "Paquete descargado",
+    "modeLabel": "Dirección de la conexión",
+    "modeAgentDials": "Agent → Control",
+    "modeMgmtDials": "Control → Agent",
+    "modeAgentDialsHint": "El Agent se conecta al control. El control debe estar escuchando (ARTEX_AGENT_LISTEN).",
+    "modeMgmtDialsHint": "El control se conecta al Agent. El Agent escucha; se omite la verificación de hostname y se reemplaza por un anclaje de CA + CN.",
+    "addressLabel": "Dirección",
+    "addressAgentDialsHint": "host:port del control al que se conecta el Agent (p. ej. management.example.com:8790).",
+    "addressMgmtDialsHint": "host:port donde escucha el Agent (p. ej. 0.0.0.0:8791).",
+    "agentIdLabel": "ID del Agent",
+    "agentIdOptional": "(opcional · se genera si está vacío)",
+    "download": "Emitir + descargar",
+    "dialTitle": "Conectar a un Agent (Control → Agent)",
+    "dialDesc": "Conecta ahora a un Agent en escucha emitido en modo mgmt-dials.",
+    "dialBtn": "Conectar",
+    "dialOk": "Conectado al Agent",
+    "errDialFields": "Se requieren ID del Agent y dirección",
+    "noAgents": "No hay Agents conectados.",
+    "connectedAt": "Conectado a las",
+    "toolsCount": "{count} herramienta(s)",
+    "pinLabel": "Fijar una tarea a este Agent",
+    "taskIdPlaceholder": "task_id",
+    "pinBtn": "Fijar",
+    "unpinBtn": "Desfijar",
+    "pinOk": "Tarea fijada",
+    "unpinOk": "Tarea desfijada",
+    "short": {
+      "off": "único",
+      "auto": "descarga",
+      "require": "sandbox"
     }
   }
 }

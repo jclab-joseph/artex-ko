@@ -177,7 +177,8 @@
       "tasks": "Tasks",
       "tools": "Tools",
       "traffic": "Traffic",
-      "workspace": "Workspace"
+      "workspace": "Workspace",
+      "exec-agents": "Exec Agent"
     }
   },
   "notFound": {
@@ -1916,6 +1917,9 @@
     "argsLabel": "Arguments (space-separated)",
     "urlLabel": "Remote URL",
     "insecureLabel": "Skip TLS certificate verification (self-signed certificates)",
+    "agentHostedLabel": "Host on the sandbox Agent (execution-plane split)",
+    "agentHostedHint": "When on, this MCP server runs on the sandbox Agent instead of the control plane. The config is snapshotted when a connection bundle is issued, so reissue the bundle after changing it. An internet-isolated sandbox cannot reach external http/sse servers — use stdio (an in-sandbox process) or an endpoint inside the sandbox network. Keep external SaaS MCP (e.g. GitHub) off and on the control plane.",
+    "agentHostedBadge": "Agent-hosted",
     "headersLabel": "Request headers (KEY=VALUE per line, e.g. Authorization=Bearer xxx)",
     "envLabel": "Environment variables (KEY=VALUE per line)",
     "refresh": "Refresh",
@@ -3215,6 +3219,10 @@
       "title": "Display language",
       "desc": "The language of on-screen text and of the reports, summaries and chat replies the agents write. It takes effect immediately with no need to save. The on-screen language is stored in this browser only, so you will need to pick it again if you switch browsers or clear site data. The agent output language is stored on the server and applies from any browser.",
       "label": "Language"
+    },
+    "splitNote": {
+      "capture": "Split mode (offload={mode}). Traffic recording runs in the sandbox Agent (artex-agent --traffic); this toggle controls whether the Agent-announced traffic query tools are exposed to the model. Run the control plane with -proxy \"\" in split mode.",
+      "proxy": "In split mode (offload={mode}) this global proxy setting has no effect. Set the upstream egress proxy on the Agent via --egress-proxy at launch."
     }
   },
   "llmPage": {
@@ -3744,6 +3752,61 @@
     "retester": {
       "name": "Vulnerability Retest",
       "description": "Launched manually from a finding's detail view; reads the original evidence and saves an independent retest conclusion."
+    }
+  },
+  "execAgentsPage": {
+    "title": "Execution Agents (sandbox)",
+    "subtitle": "Execution-plane Agents that run dangerous tools inside an internet-isolated sandbox. Distinct from the LLM personas under “Agent”.",
+    "refresh": "Refresh",
+    "loadFailed": "Load failed: {msg}",
+    "actionFailed": "Action failed: {msg}",
+    "disabledTitle": "Execution-plane split is disabled",
+    "disabledHint": "Enable it on the server via ARTEX_AGENT_LISTEN (address Agents dial in to) or ARTEX_AGENT_OFFLOAD (auto|require). With the default (off), every tool runs in-process on the control plane.",
+    "postureTitle": "Execution posture",
+    "connectedCount": "{count} Agent(s) connected",
+    "listenAddr": "Listen address",
+    "listenNone": "(not listening · Agents do not dial in)",
+    "offload": {
+      "off": "off (single process)",
+      "auto": "auto (offload when present)",
+      "require": "require (sandbox mandatory)",
+      "offHint": "Default. Every tool runs in-process on the control plane (identical to pre-split).",
+      "autoHint": "Offload execution tools to a connected Agent when one is present; fall back to local otherwise.",
+      "requireHint": "Secure posture. Execution tools MUST run in a sandbox; fail-closed (blocked) when no Agent is connected."
+    },
+    "issueBundle": "Issue connection bundle",
+    "issueBundleDesc": "Issue and download a connection bundle (JSON) for a new sandbox Agent. Run it inside your sandbox with artex-agent --bundle <file>. ARTEX only produces the bundle; you launch the sandbox yourself.",
+    "errNoAddress": "Please enter an address",
+    "bundleDownloaded": "Bundle downloaded",
+    "modeLabel": "Connection direction",
+    "modeAgentDials": "Agent → Management",
+    "modeMgmtDials": "Management → Agent",
+    "modeAgentDialsHint": "The Agent dials in to Management. Management must be listening (ARTEX_AGENT_LISTEN).",
+    "modeMgmtDialsHint": "Management dials out to the Agent. The Agent listens; hostname verification is skipped and replaced by a CA + CN pin.",
+    "addressLabel": "Address",
+    "addressAgentDialsHint": "Management host:port the Agent connects to (e.g. management.example.com:8790).",
+    "addressMgmtDialsHint": "host:port the Agent listens on (e.g. 0.0.0.0:8791).",
+    "agentIdLabel": "Agent ID",
+    "agentIdOptional": "(optional · auto-generated if empty)",
+    "download": "Issue + download",
+    "dialTitle": "Dial an Agent (Management → Agent)",
+    "dialDesc": "Connect now to a listening Agent issued in mgmt-dials mode.",
+    "dialBtn": "Dial",
+    "dialOk": "Connected to the Agent",
+    "errDialFields": "Agent ID and address are required",
+    "noAgents": "No Agents connected.",
+    "connectedAt": "Connected at",
+    "toolsCount": "{count} tool(s)",
+    "pinLabel": "Pin a task to this Agent",
+    "taskIdPlaceholder": "task_id",
+    "pinBtn": "Pin",
+    "unpinBtn": "Unpin",
+    "pinOk": "Task pinned",
+    "unpinOk": "Task unpinned",
+    "short": {
+      "off": "single",
+      "auto": "offload",
+      "require": "sandbox"
     }
   }
 }

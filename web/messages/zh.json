@@ -177,7 +177,8 @@
       "tasks": "任务",
       "tools": "工具",
       "traffic": "流量",
-      "workspace": "工作空间"
+      "workspace": "工作空间",
+      "exec-agents": "执行 Agent"
     }
   },
   "notFound": {
@@ -1916,6 +1917,9 @@
     "argsLabel": "参数（空格分隔）",
     "urlLabel": "远程 URL",
     "insecureLabel": "跳过 TLS 证书校验（自签证书）",
+    "agentHostedLabel": "由沙箱 Agent 托管（执行面分离）",
+    "agentHostedHint": "开启后，此 MCP 服务器由沙箱 Agent 托管，而非控制面。配置在签发连接 bundle 时快照，修改后需重新签发 bundle。与互联网隔离的沙箱无法访问外部 http/sse 服务器——请用 stdio（沙箱内进程）或沙箱网络内的端点。GitHub 等外部 SaaS MCP 请保持关闭、留在控制面。",
+    "agentHostedBadge": "Agent 托管",
     "headersLabel": "请求头（每行 KEY=VALUE，如 Authorization=Bearer xxx）",
     "envLabel": "环境变量（每行 KEY=VALUE）",
     "refresh": "刷新",
@@ -3215,6 +3219,10 @@
       "title": "显示语言",
       "desc": "界面文字以及智能体撰写的报告、摘要和对话回复所使用的语言。选择后立即生效，无需另行保存。界面语言只保存在当前浏览器中，更换浏览器或清除网站数据后需要重新选择。智能体输出语言保存在服务器上，从任何浏览器访问都会生效。",
       "label": "语言"
+    },
+    "splitNote": {
+      "capture": "分离模式（offload={mode}）。流量记录由沙箱 Agent（artex-agent --traffic）负责；此开关控制是否把 Agent 声明的流量查询工具暴露给模型。分离模式下控制面请用 -proxy \"\" 启动。",
+      "proxy": "分离模式（offload={mode}）下此 global proxy 设置不生效。上游 egress 代理请在 Agent 启动时用 --egress-proxy 指定。"
     }
   },
   "llmPage": {
@@ -3744,6 +3752,61 @@
     "retester": {
       "name": "漏洞复测",
       "description": "从漏洞详情手动启动，读取原证据并保存独立复测结论。"
+    }
+  },
+  "execAgentsPage": {
+    "title": "执行 Agent（沙箱）",
+    "subtitle": "在与互联网隔离的沙箱中执行危险工具的执行面 Agent。与“Agent”下的 LLM 人格不同。",
+    "refresh": "刷新",
+    "loadFailed": "加载失败：{msg}",
+    "actionFailed": "操作失败：{msg}",
+    "disabledTitle": "执行面分离未启用",
+    "disabledHint": "在服务端设置 ARTEX_AGENT_LISTEN（Agent 拨入地址）或 ARTEX_AGENT_OFFLOAD（auto|require）即可启用。默认（off）时所有工具都在控制面进程内执行。",
+    "postureTitle": "执行面姿态",
+    "connectedCount": "已连接 {count} 个 Agent",
+    "listenAddr": "监听地址",
+    "listenNone": "（未监听 · Agent 不拨入）",
+    "offload": {
+      "off": "off（单进程）",
+      "auto": "auto（有则卸载）",
+      "require": "require（强制沙箱）",
+      "offHint": "默认。所有工具在控制面进程内执行（与分离前一致）。",
+      "autoHint": "有已连接 Agent 时把执行类工具卸载到沙箱，否则本地回退。",
+      "requireHint": "安全姿态。执行类工具必须在沙箱中运行；无 Agent 连接时 fail-closed（阻断）。"
+    },
+    "issueBundle": "签发连接 bundle",
+    "issueBundleDesc": "为新的沙箱 Agent 签发并下载连接 bundle（JSON）。在沙箱内用 artex-agent --bundle <文件> 运行。ARTEX 只生成 bundle，沙箱由你自己启动。",
+    "errNoAddress": "请输入地址",
+    "bundleDownloaded": "已下载 bundle",
+    "modeLabel": "连接方向",
+    "modeAgentDials": "Agent → 控制面",
+    "modeMgmtDials": "控制面 → Agent",
+    "modeAgentDialsHint": "Agent 拨入控制面。控制面需监听（ARTEX_AGENT_LISTEN）。",
+    "modeMgmtDialsHint": "控制面拨出到 Agent。Agent 监听；跳过主机名校验，改用 CA + CN 固定。",
+    "addressLabel": "地址",
+    "addressAgentDialsHint": "Agent 连接的控制面 host:port（如 management.example.com:8790）。",
+    "addressMgmtDialsHint": "Agent 监听的 host:port（如 0.0.0.0:8791）。",
+    "agentIdLabel": "Agent ID",
+    "agentIdOptional": "（可选 · 留空自动生成）",
+    "download": "签发 + 下载",
+    "dialTitle": "拨号到 Agent（控制面 → Agent）",
+    "dialDesc": "立即连接以 mgmt-dials 模式签发、正在监听的 Agent。",
+    "dialBtn": "连接",
+    "dialOk": "已连接到 Agent",
+    "errDialFields": "需要 Agent ID 和地址",
+    "noAgents": "没有已连接的 Agent。",
+    "connectedAt": "连接时间",
+    "toolsCount": "{count} 个工具",
+    "pinLabel": "将任务固定到此 Agent",
+    "taskIdPlaceholder": "task_id",
+    "pinBtn": "固定",
+    "unpinBtn": "解除",
+    "pinOk": "已固定任务",
+    "unpinOk": "已解除固定",
+    "short": {
+      "off": "单进程",
+      "auto": "卸载",
+      "require": "沙箱"
     }
   }
 }

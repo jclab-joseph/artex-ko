@@ -33,6 +33,8 @@ import type {
   DeleteTaskResult,
   Edge,
   EvidenceBodyPreview,
+  ExecAgent,
+  ExecAgentsInfo,
   ExplorationNodePage,
   ExplorationNodeQuery,
   Finding,
@@ -1123,6 +1125,59 @@ export const api = {
   deleteMcpServer: (id: number) => del<{ deleted: number }>(`/mcp/${id}`),
   mcpTools: (id: number) => get<{ tools: MCPTool[] }>(`/mcp/${id}/tools`).then((r) => arr(r.tools)),
   refreshMcpServer: (id: number) => post<{ tools: MCPTool[] }>(`/mcp/${id}/refresh`, {}).then((r) => arr(r.tools)),
+
+  // ---- exec-agents (execution-plane split / sandbox Agents) ----
+  // GET may return 503 (ApiError.status) when agent control is disabled on the server.
+  execAgents: () =>
+    get<ExecAgentsInfo>("/exec-agents").then((r) => ({
+      offload_mode: r.offload_mode,
+      listen_addr: r.listen_addr ?? "",
+      agents: arr(r.agents),
+    })),
+  // Issues a connection bundle and triggers a browser download of the JSON file the
+  // operator saves into their sandbox (artex-agent --bundle <file>).
+  downloadAgentBundle: async (mode: string, address: string, agentId?: string) => {
+    const token = getToken();
+    const r = await fetch(`/api/exec-agents/bundle`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ mode, address, agent_id: agentId ?? "" }),
+    });
+    if (!r.ok) {
+      let msg = `bundle: ${r.status}`;
+      try {
+        const p = (await r.json()) as { error?: string };
+        if (p.error) msg = p.error;
+      } catch {
+        /* keep status fallback */
+      }
+      throw new ApiError(msg, r.status);
+    }
+    const blob = await r.blob();
+    const disp = r.headers.get("Content-Disposition") ?? "";
+    const m = disp.match(/filename="?([^"]+)"?/);
+    const filename = m?.[1] ?? `artex-agent-bundle.json`;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
+  dialAgent: (agentId: string, address: string) => post<ExecAgent>("/exec-agents/dial", { agent_id: agentId, address }),
+  execAgentTool: (id: string, tool: string, input: unknown) =>
+    post<{ tool: string; is_error: boolean; output: string }>(`/exec-agents/${encodeURIComponent(id)}/exec`, {
+      tool,
+      input,
+    }),
+  pinTaskAgent: (id: string, taskId: string) =>
+    post<{ ok: boolean }>(`/exec-agents/${encodeURIComponent(id)}/pin`, { task_id: taskId }),
+  unpinTaskAgent: (taskId: string) => post<{ ok: boolean }>("/exec-agents/unpin", { task_id: taskId }),
 
   // ---- 资产同步 (ScopeSentry 数据源) ----
   ssStatus: () =>

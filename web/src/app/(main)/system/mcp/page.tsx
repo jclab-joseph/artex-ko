@@ -28,6 +28,7 @@ type FormState = {
   url: string;
   env: string;
   insecure: boolean;
+  agentHosted: boolean;
 };
 const emptyForm: FormState = {
   name: "",
@@ -37,6 +38,7 @@ const emptyForm: FormState = {
   url: "",
   env: "",
   insecure: false,
+  agentHosted: false,
 };
 
 export default function MCPPage() {
@@ -123,6 +125,7 @@ export default function MCPPage() {
       url: s.url ?? "",
       env: envToText(s.env),
       insecure: s.insecure ?? false,
+      agentHosted: s.agent_hosted ?? false,
     });
     setTab("config");
     setOpen(true);
@@ -176,6 +179,7 @@ export default function MCPPage() {
         ...(editing ? { id: editing.id } : {}),
         name: form.name.trim(),
         enabled: editing ? editing.enabled : true,
+        agent_hosted: form.agentHosted,
         ...base,
       });
       toast.success(editing ? t("saved") : t("added"));
@@ -321,6 +325,13 @@ export default function MCPPage() {
             onChange={(e) => setF({ env: e.target.value })}
           />
         </div>
+        <div className="grid gap-1.5 rounded-md border p-3">
+          <label className="flex items-center gap-2 text-sm">
+            <Checkbox checked={form.agentHosted} onCheckedChange={(v) => setF({ agentHosted: v === true })} />
+            {t("agentHostedLabel")}
+          </label>
+          <p className="text-muted-foreground text-xs leading-relaxed">{t("agentHostedHint")}</p>
+        </div>
       </div>
     );
   }
@@ -384,6 +395,11 @@ export default function MCPPage() {
                 <Badge variant="outline" className="uppercase">
                   {s.transport}
                 </Badge>
+                {s.agent_hosted && (
+                  <Badge variant="secondary" className="shrink-0">
+                    {t("agentHostedBadge")}
+                  </Badge>
+                )}
                 {/* biome-ignore lint/a11y/noStaticElementInteractions: 부모 카드로의 클릭 전파만 차단하는 컨테이너다. 이 div 자체는 상호작용 요소가 아니고, 안쪽 Switch·삭제 버튼은 각각 키보드로 접근된다 */}
                 {/* biome-ignore lint/a11y/useKeyWithClickEvents: 위와 같이 클릭 전파 차단 전용이라 별도 키보드 핸들러가 필요 없다 */}
                 <div className="ml-auto flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
