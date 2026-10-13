@@ -80,6 +80,27 @@ func TestRemoteBackendFailsClosedOnUnannouncedExecTool(t *testing.T) {
 	}
 }
 
+// The Agent must host the interactive-shell and background-task tools (so they run in
+// the sandbox) and announce them for the control plane to proxy.
+func TestAgentHostsShellAndBackgroundTools(t *testing.T) {
+	tools := append(DefaultAgentTools("", "", false), AgentSessionTools()...)
+	ex := NewExecutor(tools, t.TempDir(), nil)
+	if err := ex.EnableBackgroundTasks("test-agent"); err != nil {
+		t.Fatalf("EnableBackgroundTasks: %v", err)
+	}
+	defer ex.Cleanup()
+	have := map[string]bool{}
+	for _, n := range ex.ToolNames() {
+		have[n] = true
+	}
+	for _, n := range append([]string{"Monitor", "TaskOutput", "TaskStop", "TaskList"},
+		"shell_open", "shell_send", "shell_read", "shell_close", "shell_list") {
+		if !have[n] {
+			t.Errorf("agent should host+announce %q", n)
+		}
+	}
+}
+
 // A FailClosedBackend must block the entire execution surface (including the shell,
 // background and db-free service tools), while leaving data tools local.
 func TestFailClosedBackendBlocksWholeExecSurface(t *testing.T) {

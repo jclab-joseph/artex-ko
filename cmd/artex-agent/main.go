@@ -112,6 +112,11 @@ func run() int {
 	// proxy when one is configured, so target traffic is captured where it happens.
 	bashEnv := remoteexec.EgressEnv(*egressProxy, *egressCA)
 	tools := remoteexec.DefaultAgentTools(*egressProxy, *egressCA, false)
+	// Interactive shells (shell_*) and background tasks (Monitor/Task*) are execution-
+	// plane features too: host them here so they spawn processes / drive PTYs INSIDE the
+	// sandbox, never on the control plane (보안 리뷰 F1/F5). Their per-session state lives
+	// on the Executor's background Manager, enabled below.
+	tools = append(tools, remoteexec.AgentSessionTools()...)
 	// db-free execution services: custom script/http tools and the enrich asset-probe
 	// pool run their process/network I/O here in the sandbox, invoked programmatically
 	// by the control plane over the same channel (not shown to the model).
@@ -151,6 +156,13 @@ func run() int {
 		log.Printf("[agent] MCP %q 호스팅: %d개 도구", cfg.Name, len(ts))
 	}
 	exec := remoteexec.NewExecutor(tools, absWork, bashEnv)
+	// Host the background-task + interactive-shell Manager in the sandbox so Monitor/
+	// shell_* keep their state here. Best-effort: on failure those tools report "not
+	// enabled" rather than falling back to the control plane.
+	if err := exec.EnableBackgroundTasks(bundle.AgentID); err != nil {
+		log.Printf("[agent] 백그라운드/대화형 셸 매니저 초기화 실패(해당 도구 비활성): %v", err)
+	}
+	defer exec.Cleanup()
 
 	log.Printf("[agent] id=%s mode=%s address=%s work=%s tools=%v",
 		bundle.AgentID, bundle.Mode, bundle.Address, absWork, exec.ToolNames())

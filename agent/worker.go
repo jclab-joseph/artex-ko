@@ -404,6 +404,9 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	// built-in WebFetch below (it would otherwise egress from the control plane).
 	remoteWebFetch := RemoteWebFetchActive(ctx)
 	base = InjectRemoteWebFetch(ctx, base)
+	// 执行面分离: 백그라운드/대화형 셸은 Agent 호스팅 — 원격 프록시로 주입하고 아래
+	// DisableBackgroundTasks 로 SDK 의 로컬 주입을 끈다(보안 리뷰 F1/F5).
+	base = InjectRemoteBackgroundTools(ctx, base)
 	tools, def, cleanup := AugmentTools(ctx, "worker", base)
 	defer cleanup()
 
@@ -467,6 +470,9 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 		EnableWebFetch: !remoteWebFetch,
 		WebFetchProxy:  w.proxyAddr,
 		WebFetchCACert: w.proxyCACert,
+		// 执行面分离时 백그라운드 매니저는 Agent 에만 둔다 → SDK 의 로컬 Monitor/Task* 주입
+		// 을 끄고(제어 플레인에서 셸 spawn 방지), 위에서 주입한 원격 프록시로 대체한다.
+		DisableBackgroundTasks: remoteWebFetch,
 		// 联网搜索(可选)。ddgs 无需 key；brave-free 需 BraveKey；tavily 需 TavilyKey。
 		// WebSearchProxy 是独立的出口代理(http/https/socks5)，与记录流量的 MITM 代理无关；空则直连。
 		EnableWebSearch:       w.webSearch.Enabled,

@@ -125,7 +125,8 @@ func (m *MainAgent) Chat(ctx context.Context, taskID int64, mainSeg int, as *db.
 	// 领域工具 + 基础默认工具集（Read/Write/Edit/MultiEdit/LS/Glob/Grep/Bash）
 	// 资产覆盖度功能关闭时剔除 add_task_scope/list_untested_assets（不入 prompt）。
 	base := append(tsx.DropCoverageTools(tsx.MainAgentTools()), actool.DefaultTools()...)
-	base = InjectRemoteWebFetch(ctx, base) // execution-plane split: route WebFetch to the sandbox Agent when bound
+	base = InjectRemoteWebFetch(ctx, base)        // execution-plane split: route WebFetch to the sandbox Agent when bound
+	base = InjectRemoteBackgroundTools(ctx, base) // 백그라운드/셸은 Agent 호스팅 (보안 리뷰 F1/F5)
 	ctx = WithRunInfo(ctx, RunInfo{TaskID: taskID, ExplorationID: explorationID(ts)})
 	tools, def, cleanup := AugmentTools(ctx, "mainagent", base)
 	defer cleanup()
@@ -144,6 +145,8 @@ func (m *MainAgent) Chat(ctx context.Context, taskID int64, mainSeg int, as *db.
 		EnableWebFetch:  !RemoteWebFetchActive(ctx), // 执行面分离时改用远程代理;否则走记录代理留痕+载入代理 CA
 		WebFetchProxy:   m.proxyAddr,
 		WebFetchCACert:  m.proxyCACert,
+		// 执行面分离时 백그라운드 매니저는 Agent 에만 → SDK 로컬 주입 차단, 원격 프록시로 대체.
+		DisableBackgroundTasks: RemoteExecActive(ctx),
 		// 联网搜索(可选)。ddgs 无需 key；brave-free 需 BraveKey；tavily 需 TavilyKey。
 		// WebSearchProxy 是独立出口代理(http/https/socks5)，与记录流量的 MITM 代理无关；空则直连。
 		EnableWebSearch:       m.webSearch.Enabled,

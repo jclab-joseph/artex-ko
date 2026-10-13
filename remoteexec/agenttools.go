@@ -19,3 +19,23 @@ func DefaultAgentTools(webFetchProxy, webFetchCACert string, webFetchInsecureTLS
 	}))
 	return tools
 }
+
+// AgentSessionTools returns the execution tools whose state lives on the Agent's
+// per-session background Manager: the background-task tools (Monitor / TaskOutput /
+// TaskStop / TaskList) and the interactive-shell session tools (shell_open/send/read/
+// close/list). The Agent hosts them so these dangerous features — spawning background
+// processes and driving interactive PTYs — happen inside the sandbox, never on the
+// control plane (보안 리뷰 F1/F5). On Management these are injected as remote proxies
+// (InjectRemoteBackgroundTools / the interactive-shell assembly) and the SDK's local
+// injection is disabled. Respects norma's AGENT_CORE_DISABLE_* env gates. The Executor
+// must have a background Manager (EnableBackgroundTasks) for them to actually run.
+func AgentSessionTools() []actool.CoreTool {
+	var out []actool.CoreTool
+	if !actool.BackgroundTasksDisabled() {
+		out = append(out, actool.NewMonitor(), actool.NewTaskOutput(), actool.NewTaskStop(), actool.NewTaskList())
+	}
+	if !actool.InteractiveShellDisabled() {
+		out = append(out, actool.ShellSessionTools()...)
+	}
+	return out
+}

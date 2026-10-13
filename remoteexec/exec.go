@@ -100,6 +100,11 @@ type Executor struct {
 	// every Bash subprocess. It is built on the Agent from the Agent-local recording
 	// proxy; Management never supplies it, so no control-plane secret can leak in.
 	bashEnv []string
+	// tasks is the background-task + interactive-shell Manager, shared across every call
+	// on this Agent so that, e.g., shell_open on one call and shell_read on the next hit
+	// the same PTY session. nil when background hosting was not enabled (tests / all-in-
+	// one, where the SDK session's own Manager is used). Set via EnableBackgroundTasks.
+	tasks *actool.Manager
 }
 
 // NewExecutor builds an Executor over the given tools. sandboxRoot is created on
@@ -110,6 +115,27 @@ func NewExecutor(tools []actool.CoreTool, sandboxRoot string, bashEnv []string) 
 		m[t.Name()] = t
 	}
 	return &Executor{tools: m, sandboxRoot: sandboxRoot, bashEnv: bashEnv}
+}
+
+// EnableBackgroundTasks gives the Executor a background-task + interactive-shell Manager
+// (tc.Tasks) so it can host norma's Monitor/Task* and shell_* tools — both keep their
+// per-session state (background processes, live PTYs) on the Manager inside the sandbox.
+// Call once on the Agent after NewExecutor; sessionID names the Manager's work dir.
+func (e *Executor) EnableBackgroundTasks(sessionID string) error {
+	mgr, err := actool.NewManager(sessionID)
+	if err != nil {
+		return err
+	}
+	e.tasks = mgr
+	return nil
+}
+
+// Cleanup tears down the background Manager (kills live processes/PTYs, removes its work
+// dir). Safe to call when background hosting was never enabled.
+func (e *Executor) Cleanup() {
+	if e.tasks != nil {
+		e.tasks.Cleanup()
+	}
 }
 
 // ToolNames returns the executable tool names, for the hello announcement.
@@ -126,7 +152,7 @@ func (e *Executor) ServeCall(ctx context.Context, name string, input json.RawMes
 	if t == nil {
 		return &WireResult{Content: nil, IsError: true}, errNoSuchTool(name)
 	}
-	tc := &actool.ToolContext{Env: e.bashEnv}
+	tc := &actool.ToolContext{Env: e.bashEnv, Tasks: e.tasks}
 	if wtc != nil {
 		tc.ToolUseID = wtc.ToolUseID
 		tc.MaxOutputChars = wtc.MaxOutputChars

@@ -119,7 +119,8 @@ func (c *ChatAgent) Chat(ctx context.Context, agentKey, sessionID, message strin
 	// visible skills/MCP and lets the DB tools table filter/override. DefaultTools
 	// have no tools-table rows, so they always pass through.
 	base := actool.DefaultTools()
-	base = InjectRemoteWebFetch(ctx, base) // execution-plane split: route WebFetch to the sandbox Agent when bound
+	base = InjectRemoteWebFetch(ctx, base)        // execution-plane split: route WebFetch to the sandbox Agent when bound
+	base = InjectRemoteBackgroundTools(ctx, base) // 백그라운드/셸은 Agent 호스팅 (보안 리뷰 F1/F5)
 	ctx = WithRunInfo(ctx, RunInfo{SessionID: sessionID})
 	tools, def, cleanup := AugmentTools(ctx, agentKey, base)
 	defer cleanup()
@@ -136,6 +137,8 @@ func (c *ChatAgent) Chat(ctx context.Context, agentKey, sessionID, message strin
 		EnableWebFetch:  !RemoteWebFetchActive(ctx), // 执行面分离时改用远程代理;否则走记录代理留痕+载入代理 CA
 		WebFetchProxy:   c.proxyAddr,
 		WebFetchCACert:  c.proxyCACert,
+		// 执行面分离时 백그라운드 매니저는 Agent 에만 → SDK 로컬 주입 차단, 원격 프록시로 대체.
+		DisableBackgroundTasks: RemoteExecActive(ctx),
 		// 联网搜索(可选)。ddgs 无需 key；brave-free 需 BraveKey；tavily 需 TavilyKey。
 		// WebSearchProxy 是独立出口代理(http/https/socks5)，与记录流量的 MITM 代理无关；空则直连。
 		EnableWebSearch:       ws.Enabled,

@@ -104,6 +104,20 @@ func InjectRemoteWebFetch(ctx context.Context, base []actool.CoreTool) []actool.
 	return base
 }
 
+// InjectRemoteBackgroundTools appends norma's background-task tools (Monitor/TaskOutput/
+// TaskStop/TaskList) to base when execution is remote, so AugmentTools wraps them into
+// remote proxies (or blocked tools when the Agent does not host them). In split mode the
+// background Manager lives only in the sandbox Agent, so each role also sets
+// opts.DisableBackgroundTasks=RemoteExecActive(ctx) to suppress the SDK's LOCAL injection
+// of these same tools (which would spawn processes on the control plane — 보안 리뷰 F1).
+// No-op when execution is in-process: the SDK injects the local ones as before.
+func InjectRemoteBackgroundTools(ctx context.Context, base []actool.CoreTool) []actool.CoreTool {
+	if RemoteExecActive(ctx) {
+		return append(base, actool.NewMonitor(), actool.NewTaskOutput(), actool.NewTaskStop(), actool.NewTaskList())
+	}
+	return base
+}
+
 // ExecBashEnv returns the Bash-subprocess egress env for a role. When Bash runs in a
 // sandboxed Agent the control plane sends none (the Agent injects its own, pointed at its
 // local recording proxy); otherwise it is the ordinary in-process proxyEnv.
