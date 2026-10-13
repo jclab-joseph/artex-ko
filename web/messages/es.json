@@ -2726,7 +2726,12 @@
       "validateRequired": "Introduzca una descripción y un objetivo",
       "validateSourceLimit": "Puede vincular hasta {max} tareas de origen",
       "createdToast": "Tarea creada",
-      "createFailed": "Error al crear: {msg}"
+      "createFailed": "Error al crear: {msg}",
+      "agentLabel": "Agent de ejecución (zona aislada)",
+      "agentPlaceholder": "Selecciona un Agent",
+      "agentNone": "Ninguno",
+      "agentHint": "Agent de la zona aislada que ejecuta las herramientas de esta tarea (opcional).",
+      "agentHintPinned": "Modo pinned: se requiere una selección para ejecutar. Sin ella, la tarea espera hasta que se seleccione un Agent."
     }
   },
   "chatSendMode": {
@@ -3772,7 +3777,9 @@
       "require": "require (zona aislada obligatoria)",
       "offHint": "Por defecto. Todas las herramientas corren en el plano de control (igual que antes de la separación).",
       "autoHint": "Descarga las herramientas de ejecución a un Agent conectado si lo hay; si no, usa el local.",
-      "requireHint": "Postura segura. Las herramientas de ejecución DEBEN correr en una zona aislada; fail-closed (bloqueado) si no hay Agent."
+      "requireHint": "Postura segura. Las herramientas de ejecución DEBEN correr en una zona aislada; fail-closed (bloqueado) si no hay Agent.",
+      "pinned": "pinned (Agent asignado por tarea)",
+      "pinnedHint": "La más estricta. Cada tarea solo corre en un Agent seleccionado explícitamente; una tarea sin Agent seleccionado/conectado ni siquiera arranca (sin planificación). Sin auto-selección ni respaldo del plano de control."
     },
     "issueBundle": "Emitir paquete de conexión",
     "issueBundleDesc": "Emite y descarga un paquete de conexión (JSON) para un nuevo Agent. Ejecútalo en tu zona aislada con artex-agent --bundle <archivo>. ARTEX solo produce el paquete; tú lanzas la zona aislada.",
@@ -3806,7 +3813,8 @@
     "short": {
       "off": "único",
       "auto": "descarga",
-      "require": "sandbox"
+      "require": "sandbox",
+      "pinned": "fijado"
     },
     "noPins": "Sin tareas fijadas"
   }

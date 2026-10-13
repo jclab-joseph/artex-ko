@@ -253,11 +253,11 @@ export default function ExecAgentsPage() {
   );
 }
 
-function normMode(m: string): "off" | "auto" | "require" {
-  return m === "auto" || m === "require" ? m : "off";
+function normMode(m: string): "off" | "auto" | "require" | "pinned" {
+  return m === "auto" || m === "require" || m === "pinned" ? m : "off";
 }
 
-const offloadVariant = { require: "default", auto: "secondary", off: "outline" } as const;
+const offloadVariant = { require: "default", pinned: "default", auto: "secondary", off: "outline" } as const;
 
 function OffloadBadge({ mode }: { mode: string }) {
   const t = useTranslations("execAgentsPage");

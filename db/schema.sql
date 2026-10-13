@@ -524,6 +524,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     timeout_seconds INTEGER NOT NULL DEFAULT 0,
     plan_heartbeat_seconds INTEGER NOT NULL DEFAULT 300,
     coverage_enabled BOOLEAN NOT NULL DEFAULT true,
+    exec_agent_id  TEXT NOT NULL DEFAULT '',  -- 执行面分离 "pinned" 模式: 本任务固定执行的沙箱 Agent id(空=未选择)
     pinned_at      TIMESTAMPTZ,
     first_run_at   TIMESTAMPTZ,
     deadline_at    TIMESTAMPTZ,
@@ -546,6 +547,7 @@ ALTER TABLE tasks ADD COLUMN IF NOT EXISTS queued BOOLEAN NOT NULL DEFAULT false
 -- 给 agent 开放 add_task_scope/list_untested_assets;false=全部关闭(见 task_scope.go)。
 -- 存量任务默认 true 保持原行为;company 关联(task_scope kind=company)不受此开关影响。
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS coverage_enabled BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS exec_agent_id TEXT NOT NULL DEFAULT '';
 -- queued_at makes admission FIFO reflect the actual enqueue order rather than the
 -- task creation order. queue_mode distinguishes first bootstrap from resuming an
 -- exploration that already owns goals/history.

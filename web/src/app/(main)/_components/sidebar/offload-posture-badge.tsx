@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils";
 // change. Self-contained: polls the exec-agents endpoint and tolerates a 503 (disabled).
 export function OffloadPostureBadge() {
   const t = useTranslations("execAgentsPage");
-  const [mode, setMode] = React.useState<"off" | "auto" | "require">("off");
+  const [mode, setMode] = React.useState<"off" | "auto" | "require" | "pinned">("off");
   const [count, setCount] = React.useState(0);
 
   React.useEffect(() => {
@@ -28,7 +28,7 @@ export function OffloadPostureBadge() {
         .then((r) => {
           if (!alive) return;
           const m = r.offload_mode;
-          setMode(m === "auto" || m === "require" ? m : "off");
+          setMode(m === "auto" || m === "require" || m === "pinned" ? m : "off");
           setCount(r.agents.length);
         })
         .catch(() => {

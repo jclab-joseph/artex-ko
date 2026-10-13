@@ -2726,7 +2726,12 @@
       "validateRequired": "请填写描述与目标",
       "validateSourceLimit": "最多关联 {max} 个来源任务",
       "createdToast": "任务已创建",
-      "createFailed": "创建失败：{msg}"
+      "createFailed": "创建失败：{msg}",
+      "agentLabel": "执行 Agent（沙箱）",
+      "agentPlaceholder": "选择 Agent",
+      "agentNone": "不选择",
+      "agentHint": "运行本任务执行类工具的沙箱 Agent（可选）。",
+      "agentHintPinned": "pinned 模式：必须选择才能运行。未选择时任务将待命，直到选定 Agent。"
     }
   },
   "chatSendMode": {
@@ -3772,7 +3777,9 @@
       "require": "require（强制沙箱）",
       "offHint": "默认。所有工具在控制面进程内执行（与分离前一致）。",
       "autoHint": "有已连接 Agent 时把执行类工具卸载到沙箱，否则本地回退。",
-      "requireHint": "安全姿态。执行类工具必须在沙箱中运行；无 Agent 连接时 fail-closed（阻断）。"
+      "requireHint": "安全姿态。执行类工具必须在沙箱中运行；无 Agent 连接时 fail-closed（阻断）。",
+      "pinned": "pinned (每任务指定 Agent)",
+      "pinnedHint": "最严格。每个任务只在显式选择的 Agent 上运行；未选择/未连接 Agent 的任务根本不会启动（也不规划）。无自动选择、无控制面回退。"
     },
     "issueBundle": "签发连接 bundle",
     "issueBundleDesc": "为新的沙箱 Agent 签发并下载连接 bundle（JSON）。在沙箱内用 artex-agent --bundle <文件> 运行。ARTEX 只生成 bundle，沙箱由你自己启动。",
@@ -3806,7 +3813,8 @@
     "short": {
       "off": "单进程",
       "auto": "卸载",
-      "require": "沙箱"
+      "require": "沙箱",
+      "pinned": "指定"
     },
     "noPins": "没有固定的任务"
   }

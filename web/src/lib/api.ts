@@ -278,6 +278,7 @@ export const api = {
     seedFirstIntent?: boolean;
     planHeartbeatSeconds?: number;
     coverageEnabled?: boolean;
+    agentId?: string; // execution-plane "pinned" mode: the sandbox Agent this task runs on
     interceptRules?: AssetInterceptRuleInput[];
   }) =>
     post<Task>("/tasks", {
@@ -292,6 +293,7 @@ export const api = {
       seed_first_intent: input.seedFirstIntent ?? false,
       plan_heartbeat_seconds: input.planHeartbeatSeconds ?? 0, // 0 = 后端归一到默认 600(10min)
       coverage_enabled: input.coverageEnabled ?? true, // 默认开;false=关闭资产覆盖度功能
+      agent_id: input.agentId ?? "", // 空=未选择(pinned 模式下任务将待命)
       intercept_rules: input.interceptRules ?? [], // 任务级资产拦截规则
     }),
   taskCategories: () => get<{ categories: TaskCategory[] }>("/task-categories").then((r) => arr(r.categories)),

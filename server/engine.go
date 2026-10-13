@@ -174,6 +174,11 @@ type Engine struct {
 	// agent-control manager; nil → always local (monolith behavior). Resolved fresh
 	// at each run start so a reconnected Agent is picked up between runs.
 	execBackend func(t *Task) remoteexec.Backend
+
+	// execReady gates whether a task may start/continue planning at all. Used by the
+	// "pinned" offload mode: a task whose selected Agent is not connected stays idle
+	// (no LLM rounds) instead of running on a wrong/absent executor. nil → always ready.
+	execReady func(t *Task) bool
 }
 
 type taskRuntime struct {
@@ -748,6 +753,21 @@ func (e *Engine) SetExecBackendResolver(fn func(t *Task) remoteexec.Backend) {
 	e.execBackend = fn
 }
 
+// SetExecReadyResolver installs the gate deciding whether a task may start planning
+// (used by the "pinned" offload mode). Wired once at startup; nil → always ready.
+func (e *Engine) SetExecReadyResolver(fn func(t *Task) bool) {
+	e.execReady = fn
+}
+
+// execReadyFor reports whether a task's executor precondition is met (always true when
+// no resolver is wired, i.e. monolith / non-pinned modes).
+func (e *Engine) execReadyFor(t *Task) bool {
+	if e.execReady == nil {
+		return true
+	}
+	return e.execReady(t)
+}
+
 // bindExecBackend attaches the task's execution backend to ctx so agent.AugmentTools
 // routes execution tools to the sandboxed Agent (or keeps them local). Resolved per
 // run so Agent reconnects take effect without rebuilding anything.
@@ -882,6 +902,9 @@ func (e *Engine) plannerLoop(ctx context.Context, t *Task) {
 		planner, _ := e.snapshotFor(t)
 		if planner == nil {
 			return // idle until LLM configured
+		}
+		if !e.execReadyFor(t) {
+			return // "pinned" mode: idle until this task's selected Agent is connected
 		}
 		if e.IsPaused(t.ID) {
 			return // user-paused: don't plan

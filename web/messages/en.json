@@ -2726,7 +2726,12 @@
       "validateRequired": "Enter a description and goal",
       "validateSourceLimit": "You can link up to {max} source tasks",
       "createdToast": "Task created",
-      "createFailed": "Creation failed: {msg}"
+      "createFailed": "Creation failed: {msg}",
+      "agentLabel": "Execution Agent (sandbox)",
+      "agentPlaceholder": "Select an Agent",
+      "agentNone": "None",
+      "agentHint": "Sandbox Agent that runs this task's execution tools (optional).",
+      "agentHintPinned": "pinned mode: a selection is required to run. Without it the task waits until an Agent is selected."
     }
   },
   "chatSendMode": {
@@ -3772,7 +3777,9 @@
       "require": "require (sandbox mandatory)",
       "offHint": "Default. Every tool runs in-process on the control plane (identical to pre-split).",
       "autoHint": "Offload execution tools to a connected Agent when one is present; fall back to local otherwise.",
-      "requireHint": "Secure posture. Execution tools MUST run in a sandbox; fail-closed (blocked) when no Agent is connected."
+      "requireHint": "Secure posture. Execution tools MUST run in a sandbox; fail-closed (blocked) when no Agent is connected.",
+      "pinned": "pinned (per-task selected Agent)",
+      "pinnedHint": "Strictest. Every task runs only on an explicitly selected Agent; a task with no selected/connected Agent does not even start (no planning). No auto-pick, no management fallback."
     },
     "issueBundle": "Issue connection bundle",
     "issueBundleDesc": "Issue and download a connection bundle (JSON) for a new sandbox Agent. Run it inside your sandbox with artex-agent --bundle <file>. ARTEX only produces the bundle; you launch the sandbox yourself.",
@@ -3806,7 +3813,8 @@
     "short": {
       "off": "single",
       "auto": "offload",
-      "require": "sandbox"
+      "require": "sandbox",
+      "pinned": "pinned"
     },
     "noPins": "No pinned tasks"
   }

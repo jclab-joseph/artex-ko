@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/Autumn-27/artex/agentctl"
@@ -20,11 +21,15 @@ import (
 //
 //	ARTEX_AGENT_LISTEN   address to accept Agents dialing in (ModeAgentDials), e.g. ":8790".
 //	                     Empty → do not listen (use ModeMgmtDials via POST /api/agents/dial).
-//	ARTEX_AGENT_OFFLOAD  "off" (default) | "auto" | "require":
+//	ARTEX_AGENT_OFFLOAD  "off" (default) | "auto" | "require" | "pinned":
 //	                       off     — run tools in-process (monolith behavior).
 //	                       auto    — offload to a connected Agent when one is present, else local.
 //	                       require — all execution MUST run in a sandbox; block (fail-closed)
-//	                                 when no Agent is connected. This is the secure posture.
+//	                                 when no Agent is connected (any connected Agent will do).
+//	                       pinned  — strictest: every task MUST have an explicitly selected
+//	                                 Agent and runs ONLY on it. No auto-pick, no local fallback.
+//	                                 A task whose Agent is unselected/disconnected does not even
+//	                                 start (its planner stays idle) — see execReady.
 const (
 	envAgentListen  = "ARTEX_AGENT_LISTEN"
 	envAgentOffload = "ARTEX_AGENT_OFFLOAD"
@@ -33,6 +38,8 @@ const (
 // offloadMode is the resolved execution policy.
 func (s *Server) offloadMode() string {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(envAgentOffload))) {
+	case "pinned":
+		return "pinned"
 	case "require":
 		return "require"
 	case "auto":
@@ -65,6 +72,23 @@ func (s *Server) initAgentControl(ctx context.Context, dataDir string) {
 	s.engine.SetExecBackendResolver(func(t *Task) remoteexec.Backend {
 		return s.resolveExecBackend(t, mode)
 	})
+	// "pinned" mode gates task start on the selected Agent being connected.
+	s.engine.SetExecReadyResolver(s.execReadyFor)
+
+	// Restore persisted task→Agent selections into the runtime pin map so "pinned"
+	// tasks re-bind to their chosen Agent across a control-plane restart.
+	if s.m != nil && s.m.pg != nil {
+		if sel, err := s.m.pg.TaskExecAgents(); err == nil {
+			for taskID, agentID := range sel {
+				s.agents.PinTask(taskID, agentID)
+			}
+			if len(sel) > 0 {
+				log.Printf("[agentctl] 복원된 작업→Agent 선택 %d건", len(sel))
+			}
+		} else {
+			log.Printf("[agentctl] 작업→Agent 선택 복원 실패: %v", err)
+		}
+	}
 
 	// enrich(DNS/HTTP 자산 프로브)의 네트워크 I/O 도 표적 지향이므로 Agent 로 보낸다.
 	// off = 종전대로 in-process. auto/require = Agent 사용(require 는 미연결 시 skip).
@@ -139,6 +163,20 @@ func (s *Server) resolveExecBackend(t *Task, mode string) remoteexec.Backend {
 	if mode == "off" {
 		return remoteexec.LocalBackend{}
 	}
+	// "pinned": the task runs ONLY on its explicitly selected Agent — no auto-pick, no
+	// local fallback. Unselected or disconnected → fail-closed (and execReady keeps the
+	// task from even starting, so this is the belt to execReady's suspenders).
+	if mode == "pinned" {
+		if t != nil {
+			if b, pinned := s.agents.PinnedBackend(t.ID); pinned && b != nil {
+				return b
+			}
+			if _, pinned := s.agents.PinnedBackend(t.ID); pinned {
+				return remoteexec.NewFailClosedBackend("이 작업에 선택된 샌드박스 Agent 가 연결되어 있지 않습니다")
+			}
+		}
+		return remoteexec.NewFailClosedBackend("이 작업에는 실행할 샌드박스 Agent 가 선택되어 있지 않습니다")
+	}
 	// Pinned task: route to its Agent, or fail closed / fall back if it is down.
 	if t != nil {
 		if b, pinned := s.agents.PinnedBackend(t.ID); pinned {
@@ -160,6 +198,21 @@ func (s *Server) resolveExecBackend(t *Task, mode string) remoteexec.Backend {
 		return remoteexec.NewFailClosedBackend("실행 정책이 샌드박스 Agent 를 요구하지만 연결된 Agent 가 없습니다")
 	}
 	return remoteexec.LocalBackend{}
+}
+
+// execReadyFor reports whether a task may start/continue planning. Only "pinned" mode
+// gates this: the task runs only when its explicitly selected Agent is connected. Other
+// modes always return true (their start behavior is unchanged). Keeping the gate here —
+// not in resolveExecBackend — means an unselected task never burns an LLM planning round.
+func (s *Server) execReadyFor(t *Task) bool {
+	if s.offloadMode() != "pinned" {
+		return true
+	}
+	if t == nil || s.agents == nil {
+		return false
+	}
+	b, pinned := s.agents.PinnedBackend(t.ID)
+	return pinned && b != nil // selected AND connected
 }
 
 // --- HTTP handlers -------------------------------------------------------------
@@ -275,11 +328,19 @@ func (s *Server) agentsPin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "에이전트가 연결되어 있지 않습니다: "+id)
 		return
 	}
-	if s.m.ResolveTask(taskID) == nil {
+	task := s.m.ResolveTask(taskID)
+	if task == nil {
 		writeErr(w, http.StatusNotFound, "작업을 찾을 수 없습니다: "+taskID)
 		return
 	}
 	s.agents.PinTask(taskID, id)
+	if tid, err := strconv.ParseInt(task.ID, 10, 64); err == nil {
+		if err := s.m.pg.SetTaskExecAgent(tid, id); err != nil {
+			log.Printf("[agentctl] 작업 %s Agent 선택 영속화 실패: %v", task.ID, err)
+		}
+	}
+	// A newly selected Agent may unblock a "pinned" task that was idling — nudge a round.
+	task.Notify()
 	writeJSON(w, http.StatusOK, map[string]any{"task_id": taskID, "agent_id": id})
 }
 
@@ -293,8 +354,14 @@ func (s *Server) agentsUnpin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "task_id 가 필요합니다")
 		return
 	}
-	s.agents.UnpinTask(strings.TrimSpace(req.TaskID))
-	writeJSON(w, http.StatusOK, map[string]any{"task_id": req.TaskID, "unpinned": true})
+	taskID := strings.TrimSpace(req.TaskID)
+	s.agents.UnpinTask(taskID)
+	if tid, err := strconv.ParseInt(taskID, 10, 64); err == nil {
+		if err := s.m.pg.SetTaskExecAgent(tid, ""); err != nil {
+			log.Printf("[agentctl] 작업 %s Agent 선택 해제 영속화 실패: %v", taskID, err)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"task_id": taskID, "unpinned": true})
 }
 
 type execReq struct {

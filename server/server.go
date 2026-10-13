@@ -325,7 +325,7 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 		resolveLang := s.outputLanguage
 		agent.OutputLanguage = resolveLang
 		config.CurrentLanguage = resolveLang
-		notify.Lang = resolveLang                       // 푸시·이메일의 심각도·상태 라벨도 같은 언어를 따른다
+		notify.Lang = resolveLang                                         // 푸시·이메일의 심각도·상태 라벨도 같은 언어를 따른다
 		wireAgentAugment(m.pg, s.skillDir, s.hostTools, s.mcpHostedTools) // 可见 skills/MCP + 流量/编排 host 工具装配进 agent 工具集
 		domainReg := buildDomainReg(m.Assets())
 		wireTools(m.pg, domainReg) // 内置工具表：按 agent 过滤 + 覆盖描述/schema + 注入默认值
@@ -1581,6 +1581,8 @@ type createTaskReq struct {
 	PlanHeartbeatSeconds int      `json:"plan_heartbeat_seconds"`      // planner 心跳触发间隔(秒);0/省略=默认600(10min);下限=默认=600,低于自动抬到600
 	SeedFirstIntent      *bool    `json:"seed_first_intent,omitempty"` // 创建时直接下发一条种子意图(内容=描述+目标),让 worker 免等首轮 planner 直接开跑;省略/null=默认关闭,走标准先规划再执行。显式传 true 才开(CTF 常一 work 解决时可省掉开跑前的 planner 轮)。
 	CoverageEnabled      *bool    `json:"coverage_enabled,omitempty"`  // 资产覆盖度功能;省略/null=默认开(true)。false=关闭覆盖度计算/展示/自动累积范围+隐藏 add_task_scope/list_untested_assets。company 关联不受影响。
+	// AgentID 执行面分离 "pinned" 模式: 本任务固定执行的沙箱 Agent id(可选;空=未选择,任务将待命直到选择)。
+	AgentID string `json:"agent_id,omitempty"`
 	// InterceptRules 任务级资产拦截/允许规则(创建时录入,存 task_intercept_rules,不进全局表)。
 	InterceptRules []taskInterceptRuleReq `json:"intercept_rules,omitempty"`
 }
@@ -1654,6 +1656,20 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	log.Printf("[task] 新建任务 #%s «%s» 目标: %s", t.ID, req.Description, req.Goal)
+	// Execution-plane "pinned" mode: bind the task to its selected sandbox Agent BEFORE
+	// launching, so the first planning round already sees the selection (execReady).
+	if agentID := strings.TrimSpace(req.AgentID); agentID != "" && s.agents != nil {
+		if !s.agents.Has(agentID) {
+			writeErr(w, 400, "선택한 샌드박스 Agent 가 연결되어 있지 않습니다: "+agentID)
+			return
+		}
+		s.agents.PinTask(t.ID, agentID)
+		if tid, perr := strconv.ParseInt(t.ID, 10, 64); perr == nil {
+			if perr := s.m.pg.SetTaskExecAgent(tid, agentID); perr != nil {
+				log.Printf("[agentctl] 작업 %s Agent 선택 영속화 실패: %v", t.ID, perr)
+			}
+		}
+	}
 	// 共享的建后流程(seed + 种子意图 + 后台目标分解 + engine.Run),与 spawn_task 复用同一段。
 	// launchTask 内部异步,不阻塞 UI —— 目标分解在后台可见地进行。
 	s.launchTask(t, req.Description+" "+req.Goal, req.SeedFirstIntent != nil && *req.SeedFirstIntent)
