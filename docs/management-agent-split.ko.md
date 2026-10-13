@@ -221,8 +221,23 @@ KEEP=1 e2e/run.sh     # 검증 후 스택 유지(디버깅)
 - **Agent 호스팅 MCP 의 제약**: (1) 설정은 번들 스냅샷이라 변경 시 재발급 필요(위 참고).
   (2) 인터넷과 분리된 샌드박스에서는 외부 http/sse MCP 로 나가는 연결이 막히므로, Agent
   호스팅 MCP 는 stdio(샌드박스 내 프로세스) 또는 샌드박스 네트워크 안의 엔드포인트가
-  적합합니다. 외부 SaaS MCP(github 등)는 제어판 호스팅으로 두세요. (3) UI 체크박스는
-  후속 — 현재 `agent_hosted` 는 MCP API(json) 또는 CLI `-mcp` 로 설정합니다.
+  적합합니다. 외부 SaaS MCP(github 등)는 제어판 호스팅으로 두세요. (3) `agent_hosted`
+  는 MCP 설정 페이지의 "샌드박스 Agent 에서 호스팅" 체크박스, MCP API(json), 또는
+  CLI `-mcp` 로 설정합니다.
+
+## 웹 UI
+
+실행면 분리를 제어판 웹 UI 에서 운용할 수 있습니다.
+
+- **시스템 → 실행 Agent**(`/system/exec-agents`): 연결된 샌드박스 Agent 목록(모드·도구·
+  접속 시각), offload 자세(off/auto/require)·수신 주소, **연결 번들 발급+다운로드**,
+  mgmt-dials 접속(dial), 작업 pin/unpin. 분리 비활성(서버 503) 시 활성화 방법을 안내.
+  LLM 페르소나 페이지(`/system/agents`)와는 구분됩니다.
+- **시스템 → MCP**: 서버별 "샌드박스 Agent 에서 호스팅"(`agent_hosted`) 체크박스 + 목록 배지.
+- **시스템 → 시스템 설정**: 분리 모드일 때 traffic capture·global proxy 항목에 의미 변화
+  안내(기록은 Agent `--traffic`, 상위는 Agent `--egress-proxy`, global proxy 무효).
+- **사이드바 자세 배지**: 분리 모드일 때 offload 모드 + 연결 Agent 수를 상시 표시
+  (Agent 0 이면 경고색), 클릭 시 실행 Agent 페이지로 이동.
 
 ## 코드 지도
 
