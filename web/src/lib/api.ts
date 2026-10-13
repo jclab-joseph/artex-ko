@@ -1133,6 +1133,7 @@ export const api = {
       offload_mode: r.offload_mode,
       listen_addr: r.listen_addr ?? "",
       agents: arr(r.agents),
+      pins: r.pins ?? {},
     })),
   // Issues a connection bundle and triggers a browser download of the JSON file the
   // operator saves into their sandbox (artex-agent --bundle <file>).

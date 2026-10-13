@@ -3807,6 +3807,7 @@
       "off": "único",
       "auto": "descarga",
       "require": "sandbox"
-    }
+    },
+    "noPins": "Sin tareas fijadas"
   }
 }

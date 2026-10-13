@@ -206,15 +206,41 @@ assert 'mcp-echo:hello-mcp' in d.get('output',''), 'unexpected MCP output: %r' %
 print('assertion passed: Management drove the sandbox-hosted MCP tool and got the echo back')
 " || fail "agent-hosted MCP assertion failed"
 
-# 7c. Per-task Agent pinning API (multi-agent routing).
+# 7c. Per-task Agent pinning (multi-agent routing). Pin validates that the task and
+#     the agent actually exist, and the pin shows up in GET /api/exec-agents.
 say "Pinning a task to the agent, then unpinning"
+# Create a real (idle) task to pin to — no LLM needed; the engine just stays idle.
+TASK_ID="$(curl -fsS "${AUTH[@]}" -X POST "$MGMT_URL/api/tasks" \
+  -H 'Content-Type: application/json' -d '{"description":"e2e pin target"}' \
+  | python3 -c 'import sys,json; print(json.load(sys.stdin)["id"])')"
+[[ -n "$TASK_ID" ]] || fail "could not create a task to pin"
+
+# Negative: pinning a non-existent task must be REJECTED (not silently succeed).
+BADPIN="$(curl -s -o /dev/null -w '%{http_code}' "${AUTH[@]}" -X POST "$MGMT_URL/api/exec-agents/$AGENT_ID/pin" \
+  -H 'Content-Type: application/json' -d '{"task_id":"no-such-task-999"}')"
+[[ "$BADPIN" == "404" ]] || fail "pinning a bogus task should 404 (got HTTP $BADPIN)"
+
+# Positive: pin the real task, and assert it appears in the exec-agents pin map.
 PINCODE="$(curl -s -o /dev/null -w '%{http_code}' "${AUTH[@]}" -X POST "$MGMT_URL/api/exec-agents/$AGENT_ID/pin" \
-  -H 'Content-Type: application/json' -d '{"task_id":"e2e-task-1"}')"
+  -H 'Content-Type: application/json' -d "{\"task_id\":\"$TASK_ID\"}")"
 [[ "$PINCODE" == "200" ]] || fail "pin should succeed (got HTTP $PINCODE)"
+curl -fsS "${AUTH[@]}" "$MGMT_URL/api/exec-agents" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+assert d.get('pins', {}).get('$TASK_ID') == '$AGENT_ID', 'pin not reflected in list: %r' % d.get('pins')
+print('assertion passed: pin for task $TASK_ID → $AGENT_ID visible in exec-agents list')
+" || fail "pin not reflected in exec-agents list"
+
+# Unpin and assert it is gone.
 UNPINCODE="$(curl -s -o /dev/null -w '%{http_code}' "${AUTH[@]}" -X POST "$MGMT_URL/api/exec-agents/unpin" \
-  -H 'Content-Type: application/json' -d '{"task_id":"e2e-task-1"}')"
+  -H 'Content-Type: application/json' -d "{\"task_id\":\"$TASK_ID\"}")"
 [[ "$UNPINCODE" == "200" ]] || fail "unpin should succeed (got HTTP $UNPINCODE)"
-ok "pin/unpin ok"
+curl -fsS "${AUTH[@]}" "$MGMT_URL/api/exec-agents" | python3 -c "
+import sys, json
+assert '$TASK_ID' not in json.load(sys.stdin).get('pins', {}), 'pin still present after unpin'
+print('assertion passed: pin cleared after unpin')
+" || fail "pin still present after unpin"
+ok "pin/unpin ok (validated + reflected in list)"
 
 # 8. Negative check: an unknown tool must be rejected by the agent.
 say "Negative check: unknown tool is rejected"

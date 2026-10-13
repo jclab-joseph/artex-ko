@@ -3807,6 +3807,7 @@
       "off": "single",
       "auto": "offload",
       "require": "sandbox"
-    }
+    },
+    "noPins": "No pinned tasks"
   }
 }

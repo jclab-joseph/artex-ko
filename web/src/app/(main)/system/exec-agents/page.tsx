@@ -2,7 +2,7 @@
 
 import * as React from "react";
 
-import { BoxIcon, DownloadIcon, PlugIcon, RefreshCwIcon, ShieldCheckIcon } from "lucide-react";
+import { BoxIcon, DownloadIcon, PlugIcon, RefreshCwIcon, ShieldCheckIcon, XIcon } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
@@ -185,7 +185,7 @@ export default function ExecAgentsPage() {
             {(info?.agents.length ?? 0) === 0 ? (
               <p className="text-muted-foreground text-sm">{t("noAgents")}</p>
             ) : (
-              info?.agents.map((a) => <AgentCard key={a.id} a={a} />)
+              info?.agents.map((a) => <AgentCard key={a.id} a={a} pins={info.pins} onChanged={load} />)
             )}
           </div>
         </>
@@ -265,10 +265,14 @@ function OffloadBadge({ mode }: { mode: string }) {
   return <Badge variant={offloadVariant[m]}>{t(`offload.${m}`)}</Badge>;
 }
 
-function AgentCard({ a }: { a: ExecAgent }) {
+function AgentCard({ a, pins, onChanged }: { a: ExecAgent; pins: Record<string, string>; onChanged: () => void }) {
   const t = useTranslations("execAgentsPage");
   const [taskId, setTaskId] = React.useState("");
   const [busy, setBusy] = React.useState(false);
+
+  const pinnedTasks = Object.keys(pins)
+    .filter((tid) => pins[tid] === a.id)
+    .sort();
 
   async function pin() {
     if (!taskId.trim()) return;
@@ -276,18 +280,20 @@ function AgentCard({ a }: { a: ExecAgent }) {
     try {
       await api.pinTaskAgent(a.id, taskId.trim());
       toast.success(t("pinOk"));
+      setTaskId("");
+      onChanged(); // re-fetch so the new pin shows and survives refresh
     } catch (e) {
       toast.error(t("actionFailed", { msg: (e as Error).message }));
     } finally {
       setBusy(false);
     }
   }
-  async function unpin() {
-    if (!taskId.trim()) return;
+  async function unpin(tid: string) {
     setBusy(true);
     try {
-      await api.unpinTaskAgent(taskId.trim());
+      await api.unpinTaskAgent(tid);
       toast.success(t("unpinOk"));
+      onChanged();
     } catch (e) {
       toast.error(t("actionFailed", { msg: (e as Error).message }));
     } finally {
@@ -319,11 +325,29 @@ function AgentCard({ a }: { a: ExecAgent }) {
             ))}
           </div>
         </div>
-        <div className="flex flex-wrap items-end gap-2 border-t pt-3">
-          <div className="grid gap-1.5">
-            <Label htmlFor={`pin-${a.id}`} className="text-xs">
-              {t("pinLabel")}
-            </Label>
+        <div className="flex flex-col gap-2 border-t pt-3">
+          <span className="text-muted-foreground text-xs">{t("pinLabel")}</span>
+          {pinnedTasks.length > 0 ? (
+            <div className="flex flex-wrap gap-1">
+              {pinnedTasks.map((tid) => (
+                <Badge key={tid} variant="secondary" className="gap-1 font-mono text-[11px]">
+                  {tid}
+                  <button
+                    type="button"
+                    aria-label={t("unpinBtn")}
+                    className="hover:text-destructive disabled:opacity-50"
+                    disabled={busy}
+                    onClick={() => unpin(tid)}
+                  >
+                    <XIcon className="size-3" />
+                  </button>
+                </Badge>
+              ))}
+            </div>
+          ) : (
+            <span className="text-muted-foreground text-xs italic">{t("noPins")}</span>
+          )}
+          <div className="flex flex-wrap items-end gap-2">
             <Input
               id={`pin-${a.id}`}
               className="h-8 w-56 font-mono"
@@ -331,13 +355,10 @@ function AgentCard({ a }: { a: ExecAgent }) {
               value={taskId}
               onChange={(e) => setTaskId(e.target.value)}
             />
+            <Button size="sm" variant="outline" onClick={pin} disabled={busy || !taskId.trim()}>
+              {t("pinBtn")}
+            </Button>
           </div>
-          <Button size="sm" variant="outline" onClick={pin} disabled={busy || !taskId.trim()}>
-            {t("pinBtn")}
-          </Button>
-          <Button size="sm" variant="ghost" onClick={unpin} disabled={busy || !taskId.trim()}>
-            {t("unpinBtn")}
-          </Button>
         </div>
       </CardContent>
     </Card>

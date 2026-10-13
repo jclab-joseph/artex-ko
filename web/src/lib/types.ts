@@ -1206,6 +1206,7 @@ export interface ExecAgentsInfo {
   offload_mode: "off" | "auto" | "require" | string;
   listen_addr: string;
   agents: ExecAgent[];
+  pins: Record<string, string>; // task_id → agent_id (ephemeral, in-memory routing pins)
 }
 
 // ---- Skills ----

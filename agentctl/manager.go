@@ -253,6 +253,24 @@ func (m *Manager) PinTask(taskID, agentID string) {
 // UnpinTask clears a task's Agent pin.
 func (m *Manager) UnpinTask(taskID string) { m.PinTask(taskID, "") }
 
+// Has reports whether an Agent with this id is currently connected.
+func (m *Manager) Has(agentID string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.agents[agentID] != nil
+}
+
+// Pins returns a snapshot of the task→Agent pin map (task id → agent id).
+func (m *Manager) Pins() map[string]string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make(map[string]string, len(m.pins))
+	for k, v := range m.pins {
+		out[k] = v
+	}
+	return out
+}
+
 // PinnedAgentID returns the Agent id pinned to a task, or "".
 func (m *Manager) PinnedAgentID(taskID string) string {
 	m.mu.RLock()

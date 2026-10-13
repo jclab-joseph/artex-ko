@@ -181,6 +181,7 @@ func (s *Server) agentsList(w http.ResponseWriter, r *http.Request) {
 		"offload_mode": s.offloadMode(),
 		"listen_addr":  os.Getenv(envAgentListen),
 		"agents":       s.agents.List(),
+		"pins":         s.agents.Pins(),
 	})
 }
 
@@ -267,8 +268,19 @@ func (s *Server) agentsPin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "task_id 가 필요합니다")
 		return
 	}
-	s.agents.PinTask(strings.TrimSpace(req.TaskID), id)
-	writeJSON(w, http.StatusOK, map[string]any{"task_id": req.TaskID, "agent_id": id})
+	taskID := strings.TrimSpace(req.TaskID)
+	// Validate the target Agent is actually connected and the task exists, so a typo
+	// (or a stale/non-existent task id) is rejected instead of silently "succeeding".
+	if !s.agents.Has(id) {
+		writeErr(w, http.StatusNotFound, "에이전트가 연결되어 있지 않습니다: "+id)
+		return
+	}
+	if s.m.ResolveTask(taskID) == nil {
+		writeErr(w, http.StatusNotFound, "작업을 찾을 수 없습니다: "+taskID)
+		return
+	}
+	s.agents.PinTask(taskID, id)
+	writeJSON(w, http.StatusOK, map[string]any{"task_id": taskID, "agent_id": id})
 }
 
 // agentsUnpin clears a task's Agent pin (falls back to any-agent routing).
