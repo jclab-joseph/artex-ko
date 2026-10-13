@@ -98,7 +98,20 @@ HTTP API 로도 발급·조회할 수 있습니다(로그인 필요):
 | 변수 | 의미 |
 |---|---|
 | `ARTEX_AGENT_LISTEN` | Agent 가 dial-in 할 제어 플레인 수신 주소(예 `:8790`). 비우면 미수신(대신 `/dial`). |
-| `ARTEX_AGENT_OFFLOAD` | `off`(기본·단일 프로세스 그대로) / `auto`(연결돼 있으면 오프로드) / `require`(샌드박스 필수, 미연결 시 **fail-closed**) |
+| `ARTEX_AGENT_OFFLOAD` | `off`(기본·단일 프로세스 그대로) / `auto`(연결돼 있으면 오프로드) / `require`(샌드박스 필수, 미연결 시 **fail-closed**; 아무 Agent 나 사용) / `pinned`(가장 엄격, 아래) |
+
+### `pinned` 모드 — 작업별 Agent 선택 강제
+
+`pinned` 은 "task 는 반드시 **명시적으로 선택된** Agent 에서만 동작" 을 강제합니다.
+
+- 각 task 는 실행할 샌드박스 Agent 를 **명시 선택**해야 합니다(task 생성 시 `agent_id`
+  또는 실행 Agent 페이지에서 핀). `auto`/`require` 와 달리 **자동 선택(최신 Agent)·
+  management 폴백이 없습니다.**
+- 선택이 없거나 선택한 Agent 가 미연결이면 **task 가 시작조차 되지 않습니다** — 플래너
+  루프가 `execReady` 게이트에서 유휴 상태로 대기(LLM 라운드도 소비 안 함). 위험한 실행계
+  도구는 fail-closed.
+- 선택은 `tasks.exec_agent_id` 에 **영속**되어 제어 플레인 재시작에도 유지되며, 기동 시
+  런타임 핀 맵으로 복원됩니다. 선택 후에는 유휴 task 를 깨워 즉시 진행합니다.
 
 Agent 측: `--bundle`(또는 `ARTEX_AGENT_BUNDLE`), `--work`, `--egress-proxy`, `--egress-ca`,
 `--reconnect`, 그리고 traffic 호스팅용:
@@ -238,6 +251,8 @@ KEEP=1 e2e/run.sh     # 검증 후 스택 유지(디버깅)
   안내(기록은 Agent `--traffic`, 상위는 Agent `--egress-proxy`, global proxy 무효).
 - **사이드바 실행 플레인 배지**: 분리 모드일 때 offload 모드 + 연결 Agent 수를 상시 표시
   (Agent 0 이면 경고색), 클릭 시 실행 Agent 페이지로 이동.
+- **작업 생성 다이얼로그**: 분리 모드일 때 "실행 Agent" 선택 드롭다운(연결된 Agent 목록).
+  `pinned` 모드에선 선택해야 작업이 실행되며, 미선택 시 대기한다는 안내를 함께 표시.
 
 ## 코드 지도
 
