@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/Autumn-27/artex/agent"
+	"github.com/Autumn-27/artex/agentctl"
 	"github.com/Autumn-27/artex/config"
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/intercept"
@@ -112,6 +113,12 @@ type Server struct {
 	m      *Manager
 	engine *Engine
 	ctx    context.Context
+
+	// agents is the execution-plane control: the mTLS CA, Agent registry, and the
+	// backend resolver the engine uses to route a task's tool calls to a sandboxed
+	// Agent. nil only if agent control failed to initialize (control plane then runs
+	// tools in-process as the monolith always did, unless offload is required).
+	agents *agentctl.Manager
 
 	skillDir string // root directory for skill subdirectories
 	jwtKey   []byte // HS256 signing key loaded from / generated into dataDir/jwt.key
@@ -362,6 +369,7 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 	} else {
 		log.Printf("[engine] no LLM provider configured — engine idle until set via /api/llm or env")
 	}
+	s.initAgentControl(ctx, dataDir) // execution-plane split: CA, agent registry, listener, engine binding
 	s.restoreTaskRuntimes()
 	go s.reconcileConcurrency()
 	s.startTaskArchiveWorker()
@@ -1040,6 +1048,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/intercept/tool-config", s.interceptSetToolConfig)
 	mux.HandleFunc("GET /api/intercept/judge", s.interceptGetJudgeConfig)
 	mux.HandleFunc("PUT /api/intercept/judge", s.interceptSetJudgeConfig)
+
+	// 실행면 분리: 샌드박스 Agent 제어(연결 번들 발급·연결 상태·진단 실행).
+	// 경로는 LLM 페르소나용 /api/agents 와 구분하기 위해 /api/exec-agents 를 쓴다.
+	mux.HandleFunc("GET /api/exec-agents", s.agentsList)
+	mux.HandleFunc("POST /api/exec-agents/bundle", s.agentsIssueBundle)
+	mux.HandleFunc("POST /api/exec-agents/dial", s.agentsDial)
+	mux.HandleFunc("POST /api/exec-agents/{id}/exec", s.agentsExec)
 
 	// /api/* goes through CORS + JWT; everything else is served by the embedded
 	// frontend (public — auth is enforced client-side and on the API). With the

@@ -7,6 +7,7 @@ import (
 	"log"
 	"runtime/debug"
 
+	"github.com/Autumn-27/artex/remoteexec"
 	actool "github.com/Autumn-27/norma/tool"
 )
 
@@ -61,10 +62,44 @@ func AugmentTools(ctx context.Context, agentKey string, base []actool.CoreTool) 
 		out = ToolResolve(ctx, agentKey, out)
 	}
 	out, def.FindingGuidance = findingWorkflowTools(agentKey, out)
+	// Execution-plane split: when a sandboxed Agent is bound to this run (via the
+	// context), replace each execution tool's Call with a proxy that ships the call
+	// over mTLS to the Agent. Data/graph tools (insert_assets, record_fact, …) and
+	// anything the Agent did not announce stay in-process. Unbound runs get the
+	// LocalBackend, which is a no-op — identical to the pre-split monolith. The guard
+	// panic-wrapper is applied last, so it still covers remote tools (a transport
+	// error returns as a tool error, never a panic).
+	backend := remoteexec.BackendFrom(ctx)
 	for i, t := range out {
-		out[i] = guardPanic(t)
+		out[i] = guardPanic(backend.Wrap(t))
 	}
 	return out, def, cleanup
+}
+
+// RemoteWebFetchActive reports whether the execution backend bound to ctx runs WebFetch
+// in a sandboxed Agent. Roles use it to disable norma's in-process WebFetch (which would
+// otherwise egress from the control plane) and inject a remote proxy instead.
+func RemoteWebFetchActive(ctx context.Context) bool {
+	be := remoteexec.BackendFrom(ctx)
+	return be.IsRemote() && be.Executes("WebFetch")
+}
+
+// InjectRemoteWebFetch appends a plain WebFetch tool to base when the bound backend runs
+// WebFetch remotely, so AugmentTools wraps it into a remote proxy. The config is empty on
+// purpose: the Agent builds the real WebFetch with its own local recording proxy; here we
+// only need the tool's name/description/schema. No-op when execution is in-process.
+func InjectRemoteWebFetch(ctx context.Context, base []actool.CoreTool) []actool.CoreTool {
+	if RemoteWebFetchActive(ctx) {
+		return append(base, actool.NewWebFetch(actool.WebFetchConfig{}))
+	}
+	return base
+}
+
+// ExecBashEnv returns the Bash-subprocess egress env for a role. When Bash runs in a
+// sandboxed Agent the control plane sends none (the Agent injects its own, pointed at its
+// local recording proxy); otherwise it is the ordinary in-process proxyEnv.
+func ExecBashEnv(ctx context.Context, proxyAddr, caCert string) []string {
+	return remoteBashEnv(remoteexec.BackendFrom(ctx), proxyAddr, caCert)
 }
 
 // guardPanic turns a panicking tool handler into an ordinary tool error. The

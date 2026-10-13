@@ -12,6 +12,7 @@ import (
 
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/intercept"
+	"github.com/Autumn-27/artex/remoteexec"
 	"github.com/Autumn-27/norma/agentcore"
 	"github.com/Autumn-27/norma/harness"
 	"github.com/Autumn-27/norma/llm"
@@ -201,6 +202,18 @@ func (w *Worker) SetWebSearch(o WebSearchOpts) { w.webSearch = o }
 // honor the proxy vars. ALL_PROXY is set too so a socks5 egress proxy (which curl
 // only reads from ALL_PROXY, not HTTP(S)_PROXY) works in the capture-off path.
 // Empty proxyAddr → nil (direct, unchanged env).
+// remoteBashEnv returns the Bash egress env for the control plane. When a sandboxed
+// Agent runs Bash, the control plane sends no egress env at all — the Agent injects
+// its own, pointing at its local recording proxy — so target traffic is captured in
+// the sandbox and no Management-side network hint crosses the boundary. Otherwise it
+// is the ordinary in-process proxyEnv.
+func remoteBashEnv(backend remoteexec.Backend, proxyAddr, caCert string) []string {
+	if backend.IsRemote() && backend.Executes("Bash") {
+		return nil
+	}
+	return proxyEnv(proxyAddr, caCert)
+}
+
 func proxyEnv(proxyAddr, caCert string) []string {
 	if proxyAddr == "" {
 		return nil
@@ -378,6 +391,11 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	// 收敛工具面、减少低价值调用。其余 SDK 默认工具(Read/Write/Edit/LS/Bash/Sleep)照常。
 	base = append(base, defaultToolsExcept("MultiEdit", "Glob", "Grep")...)
 	ctx = WithRunInfo(ctx, RunInfo{TaskID: taskID, ExplorationID: explorationID(ts), IntentID: intent.ID})
+	// Execution-plane split: when a sandboxed Agent handles WebFetch, inject a plain
+	// WebFetch tool so AugmentTools wraps it into a remote proxy, and disable norma's
+	// built-in WebFetch below (it would otherwise egress from the control plane).
+	remoteWebFetch := RemoteWebFetchActive(ctx)
+	base = InjectRemoteWebFetch(ctx, base)
 	tools, def, cleanup := AugmentTools(ctx, "worker", base)
 	defer cleanup()
 
@@ -436,7 +454,9 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 		PermissionMode:  permission.ModeBypass,
 		// WebFetch 走记录代理，其 HTTP 与 curl 一样被留痕；载入代理 CA 让经 MITM
 		// 重签的 HTTPS 证书能【正常校验通过】（而非关掉校验）。proxy 空则直连。
-		EnableWebFetch: true,
+		// 执行面分离时(remoteWebFetch)关闭内置 WebFetch，改用上面注入的远程代理工具，
+		// 由 Agent 侧指向其本地记录代理执行。
+		EnableWebFetch: !remoteWebFetch,
 		WebFetchProxy:  w.proxyAddr,
 		WebFetchCACert: w.proxyCACert,
 		// 联网搜索(可选)。ddgs 无需 key；brave-free 需 BraveKey；tavily 需 TavilyKey。
@@ -450,7 +470,9 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 		DeepSeekSearchModel:   w.webSearch.DeepSeekModel,
 		WebSearchProxy:        w.webSearch.Proxy,
 		// Bash 子命令的 HTTP 默认走记录代理 + 信任其 CA（工具无需 -x/-k）。
-		BashEnv:    proxyEnv(w.proxyAddr, w.proxyCACert),
+		// 执行面分离时 Bash 在 Agent 侧运行,出口环境由 Agent 本地注入(指向其本地记录代理),
+		// 控制面不下发代理设置,避免把管理侧网络信息带过边界。
+		BashEnv:    ExecBashEnv(ctx, w.proxyAddr, w.proxyCACert),
 		WorkingDir: runDir,
 		MaxTurns:   w.maxTurns, // 0 = unlimited (configurable in agent management)
 		// 墙钟预算,轮边界判,不打断半路;0 = 不限。有任务级 deadline 时夹逼到 min(自身预算,
