@@ -48,6 +48,7 @@ say "Building artex and artex-agent (linux/amd64)"
 mkdir -p e2e/dist
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o e2e/dist/artex ./cmd/artex
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o e2e/dist/artex-agent ./cmd/artex-agent
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o e2e/dist/mcpstub ./e2e/mcpstub
 ok "binaries built"
 
 # 2. Bring the stack up. compose orders it: postgres → management(healthy) →
@@ -180,6 +181,30 @@ resp = base64.b64decode(e.get('resp_b64',''))  # must decode
 assert e.get('resp_head'), 'missing response head: %r' % e
 print('assertion passed: evidence synced from sandbox (resp %d bytes, head present)' % len(resp))
 " || fail "evidence sync assertion failed"
+
+# 7b-mcp. Agent-hosted MCP: the bundle told the Agent to host the mcpstub MCP server
+#   (a stdio child process in the sandbox); it announced mcp__e2estub__echo with its
+#   schema. Drive that tool from Management THROUGH the Agent and assert the echo —
+#   proving a real MCP server runs in the sandbox and the control plane routes to it.
+say "Driving an Agent-hosted MCP tool (mcp__e2estub__echo) over the channel"
+echo "$AGENTS" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+tools = (d.get('agents') or [{}])[0].get('tools', [])
+assert 'mcp__e2estub__echo' in tools, 'agent did not announce the hosted MCP tool: %r' % tools
+print('assertion passed: agent announced mcp__e2estub__echo')
+" || fail "agent did not announce the hosted MCP tool"
+MCPRESP="$(curl -fsS "${AUTH[@]}" -X POST "$MGMT_URL/api/exec-agents/$AGENT_ID/exec" \
+  -H 'Content-Type: application/json' \
+  -d '{"tool":"mcp__e2estub__echo","input":{"text":"hello-mcp"}}')"
+echo "$MCPRESP" | python3 -m json.tool
+echo "$MCPRESP" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+assert d.get('is_error') is not True, 'MCP tool errored: %r' % d
+assert 'mcp-echo:hello-mcp' in d.get('output',''), 'unexpected MCP output: %r' % d
+print('assertion passed: Management drove the sandbox-hosted MCP tool and got the echo back')
+" || fail "agent-hosted MCP assertion failed"
 
 # 7c. Per-task Agent pinning API (multi-agent routing).
 say "Pinning a task to the agent, then unpinning"

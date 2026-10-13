@@ -17,6 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Paths are relative to the build context (the repo root; see compose `context: ..`).
 COPY e2e/dist/artex /usr/local/bin/artex
 COPY e2e/dist/artex-agent /usr/local/bin/artex-agent
+COPY e2e/dist/mcpstub /usr/local/bin/mcpstub
 COPY skills/ /app/skills/
 
 WORKDIR /app

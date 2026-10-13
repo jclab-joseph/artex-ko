@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -19,6 +20,7 @@ import (
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/agentctl"
 	"github.com/Autumn-27/artex/config"
+	"github.com/Autumn-27/artex/mcpconn"
 	"github.com/Autumn-27/artex/remoteexec"
 	"github.com/Autumn-27/artex/selfupdate"
 	"github.com/Autumn-27/artex/server"
@@ -69,14 +71,28 @@ func issueAgentCmd(args []string) int {
 	address := fs.String("address", "", "agent-dials: Management's reachable host:port; mgmt-dials: the Agent's listen host:port")
 	id := fs.String("id", "", "agent id (optional; auto-generated when empty)")
 	out := fs.String("out", "", "output file for the bundle JSON (default: stdout)")
+	mcpFile := fs.String("mcp", "", "optional JSON file: array of MCP server configs for the Agent to host (db-free alternative to the DB agent_hosted flag)")
 	_ = fs.Parse(args)
+
+	var mcp []mcpconn.Config
+	if *mcpFile != "" {
+		raw, err := os.ReadFile(*mcpFile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "issue-agent: read -mcp %s: %v\n", *mcpFile, err)
+			return 1
+		}
+		if err := json.Unmarshal(raw, &mcp); err != nil {
+			fmt.Fprintf(os.Stderr, "issue-agent: parse -mcp %s: %v\n", *mcpFile, err)
+			return 1
+		}
+	}
 
 	mgr, err := agentctl.NewManager(*dataDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "issue-agent: %v\n", err)
 		return 1
 	}
-	bundle, err := mgr.IssueBundle(remoteexec.ConnMode(*mode), *address, *id, nil)
+	bundle, err := mgr.IssueBundle(remoteexec.ConnMode(*mode), *address, *id, mcp)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "issue-agent: %v\n", err)
 		return 1

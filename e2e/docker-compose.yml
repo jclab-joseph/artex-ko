@@ -57,14 +57,15 @@ services:
     depends_on:
       management:
         condition: service_healthy
+    # Writes an Agent-hosted MCP config (a stdio server = the mcpstub binary that ships
+    # in the image) then mints a bundle carrying it, so the Agent hosts the MCP server
+    # IN the sandbox and Management drives its tool over the channel.
+    entrypoint: ["/bin/sh", "-c"]
     command:
-      - artex
-      - issue-agent
-      - -data=/data
-      - -mode=agent-dials-mgmt
-      - -address=management:8790
-      - -id=e2e-agent
-      - -out=/shared/bundle.json
+      - |
+        echo '[{"name":"e2estub","transport":"stdio","command":"/usr/local/bin/mcpstub"}]' > /shared/mcp.json &&
+        artex issue-agent -data=/data -mode=agent-dials-mgmt -address=management:8790 \
+          -id=e2e-agent -mcp=/shared/mcp.json -out=/shared/bundle.json
     volumes:
       - mgmtdata:/data
       - shared:/shared
