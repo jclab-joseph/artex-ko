@@ -54,9 +54,26 @@ func (s *Server) offloadMode() string {
 // the control plane keeps working in-process (unless offload is "require", in which
 // case execution fails closed — the whole point of the secure posture).
 func (s *Server) initAgentControl(ctx context.Context, dataDir string) {
+	mode := s.offloadMode()
 	mgr, err := agentctl.NewManager(dataDir)
 	if err != nil {
-		log.Printf("[agentctl] 초기화 실패(실행 플레인 분리 비활성): %v", err)
+		log.Printf("[agentctl] 초기화 실패: %v", err)
+		// Fail closed in a mandatory posture (보안 리뷰 F7): initialization failure must
+		// NOT silently drop to local execution. Install a fail-closed backend resolver +
+		// (pinned) a never-ready gate, and a failing enrich prober, so no tool runs on the
+		// control plane and no pinned task starts. auto/off keep in-process behavior.
+		if mode == "require" || mode == "pinned" {
+			s.engine.SetExecBackendResolver(func(*Task) remoteexec.Backend {
+				return remoteexec.NewFailClosedBackend(execInitFailedReason)
+			})
+			s.engine.SetExecReadyResolver(s.execReadyFor) // s.agents==nil → pinned never ready
+			if s.m != nil && s.m.enrich != nil {
+				s.m.enrich.SetProber(failedProber{mode: mode})
+			}
+			log.Printf("[agentctl] 오프로드=%s → fail-closed 유지(제어 플레인 로컬 실행/작업 시작 차단)", mode)
+		} else {
+			log.Printf("[agentctl] 오프로드=%s → in-process 로 계속(분리 비활성)", mode)
+		}
 		return
 	}
 	s.agents = mgr
@@ -67,7 +84,6 @@ func (s *Server) initAgentControl(ctx context.Context, dataDir string) {
 		}
 	}
 
-	mode := s.offloadMode()
 	log.Printf("[agentctl] 실행 플레인 오프로드 모드=%s", mode)
 	s.engine.SetExecBackendResolver(func(t *Task) remoteexec.Backend {
 		return s.resolveExecBackend(t, mode)
@@ -207,14 +223,36 @@ func (s *Server) resolveExecBackend(t *Task, mode string) remoteexec.Backend {
 // Agent → fail closed, since there is no Agent selection to honor). No-op when the agent
 // control plane is disabled or offload is "off", so monolith behavior is unchanged.
 func (s *Server) bindExecCtx(ctx context.Context, t *Task) context.Context {
-	if s.agents == nil {
-		return ctx
-	}
 	mode := s.offloadMode()
 	if mode == "off" {
 		return ctx
 	}
+	if s.agents == nil {
+		// Agent control failed to initialize. A mandatory posture must fail closed here
+		// too, not fall back to local execution (보안 리뷰 F7); auto keeps in-process.
+		if mode == "require" || mode == "pinned" {
+			return remoteexec.WithBackend(ctx, remoteexec.NewFailClosedBackend(execInitFailedReason))
+		}
+		return ctx
+	}
 	return remoteexec.WithBackend(ctx, s.resolveExecBackend(t, mode))
+}
+
+// execInitFailedReason is surfaced to the model when agent control failed to initialize
+// under a mandatory offload posture: every execution tool is blocked.
+const execInitFailedReason = "실행 플레인 제어 초기화에 실패하여 샌드박스 Agent 를 사용할 수 없습니다(관리자 조치 필요); 격리 정책상 제어 플레인에서 실행할 수 없습니다"
+
+// failedProber is the enrich prober installed when agent control fails to initialize in a
+// mandatory posture: target DNS/HTTP probes must never run on the control plane, so it
+// errors instead of falling back in-process. (auto never reaches here — it keeps the
+// in-process prober.)
+type failedProber struct{ mode string }
+
+func (p failedProber) ResolveDNS(context.Context, string) (*enrich.DNSData, error) {
+	return nil, errors.New("실행 플레인 제어 초기화 실패로 DNS 프로브를 샌드박스에서 실행할 수 없습니다")
+}
+func (p failedProber) ProbeHTTP(context.Context, string) (*enrich.HTTPData, error) {
+	return nil, errors.New("실행 플레인 제어 초기화 실패로 HTTP 프로브를 샌드박스에서 실행할 수 없습니다")
 }
 
 // execReadyFor reports whether a task may start/continue planning. Only "pinned" mode
