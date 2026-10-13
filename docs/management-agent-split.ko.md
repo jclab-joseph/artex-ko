@@ -12,9 +12,12 @@ ARTEX 를 **제어판(Management Server)** 과 **실행면(Agent)** 으로 나�
 > - **P2-D**: traffic 기록 스토어(MITM 프록시+SQLite 인덱스+blob)와 조회 도구
 >   (traffic_search/get/blob)를 Agent 에서 호스팅. 바인딩 시점 증거는
 >   `__artex_traffic_evidence` 로 제어판에 동기화(스냅샷 후 리포트는 Agent 비의존).
+> - **P2-E**: 서버별 선택적 **Agent 호스팅 MCP**. agent-hosted 로 표시된 MCP 서버는
+>   샌드박스 Agent 가 호스팅(stdio=샌드박스 자식프로세스)하고, 제어판은 announce 메타로
+>   placeholder 를 만들어 백엔드로 라우팅. github 등은 종전대로 제어판.
 >
 > docker-compose e2e(`e2e/run.sh`)가 Bash·`__artex_dns`·샌드박스 트래픽 캡처→조회
-> →증거 동기화·pin/unpin 을 검증합니다. 남은 범위(Agent 호스팅 MCP)는 "로드맵" 참고.
+> →증거 동기화·**Agent 호스팅 MCP**·pin/unpin 을 검증합니다.
 
 ## 왜 포크 없이 되는가 (핵심 설계)
 
@@ -43,7 +46,7 @@ PreToolUse 게이트(intercept 규칙, LLM 심판, 사람 승인)는 디스패�
 | Postgres(assets/findings/exploration/settings) | 없음(로컬 작업 디렉터리뿐) |
 | HTTP API·UI·스케줄러·notifier | 없음 |
 | web_search(검색엔진=정찰, 표적 아님) | — |
-| MCP(github 등 제어판 도구) | — *(Agent 호스팅 MCP 는 로드맵)* |
+| MCP(github 등 제어판 도구; `agent_hosted=false`) | MCP(`agent_hosted=true`; stdio=샌드박스 자식프로세스, http/sse=샌드박스 내 엔드포인트) |
 | 커스텀 도구 정의·템플릿·시크릿 주입 | 커스텀 **command/script/http 실행부** |
 | enrich 엔진·자산 그래프 쓰기(DB) | enrich **DNS·HTTP 프로브** 네트워크 I/O |
 | traffic 조회 도구를 **RPC 프록시/메타로만** 보유 | traffic **MITM 프록시·SQLite 인덱스·blob 스토어** + traffic_search/get/blob 실행 |
@@ -109,6 +112,19 @@ Agent 측: `--bundle`(또는 `ARTEX_AGENT_BUNDLE`), `--work`, `--egress-proxy`, 
 가 담당합니다. 제어판의 traffic 조회 도구는 capture 토글이 켜지고 `offload != off` 일 때
 메타데이터로 주입되어 백엔드가 Agent 로 라우팅합니다(미연결 시 fail-closed).
 
+### MCP 호스팅 설정
+
+MCP 서버를 Agent(샌드박스)에서 호스팅하려면 두 경로가 있습니다.
+
+- **DB/UI 경로**: `mcp_servers.agent_hosted=true`. MCP API 로 설정합니다 —
+  `POST /api/mcp` 본문에 `"agent_hosted": true`. 이후 `POST /api/exec-agents/bundle` 로
+  번들을 발급하면 agent-hosted 로 표시된(enabled) 서버 설정이 번들에 스냅샷됩니다.
+- **CLI 경로(DB 불필요)**: `artex issue-agent -mcp <file.json>` — `mcpconn.Config` 배열
+  JSON 을 번들에 주입합니다. 예: `[{"name":"mysrv","transport":"stdio","command":"/usr/local/bin/mymcp"}]`.
+
+설정은 발급 시 스냅샷이므로 **MCP 구성 변경 시 번들을 재발급**(샌드박스 재기동)하세요
+(인증서 모델과 동일). env 맵은 http/sse 전송에서 HTTP 헤더(예: Authorization)로도 쓰입니다.
+
 **보안 자세**: 운영에서는 `ARTEX_AGENT_OFFLOAD=require` 를 권장합니다. 이때 Agent 가 없으면
 실행계 도구는 "플랫폼 관리·실행면 미준비" 오류로 **차단**되고, 데이터/그래프 도구(record_fact 등)만
 제어판에서 계속 동작합니다. `off`/`auto` + 미연결이면 종전처럼 in-process 로 실행됩니다.
@@ -130,6 +146,8 @@ provision+agent+target)를 띄운 뒤, 제어판에서 **Agent 를 거쳐 mTLS �
 - 샌드박스 트래픽 캡처→조회: Agent 가 자신의 호스팅 레코더를 거쳐 `http://target/` 를
   fetch 한 뒤 제어판이 `traffic_search` 로 캡처된 교환을 되받음,
 - 증거 동기화: `__artex_traffic_evidence` 로 교환 원문 바이트(base64)를 샌드박스에서 가져옴,
+- Agent 호스팅 MCP: Agent 가 샌드박스에서 stdio MCP 서버(`e2e/mcpstub`)를 호스팅하고
+  `mcp__e2estub__echo` 를 announce, 제어판이 그 도구를 채널로 구동해 echo 를 되받음,
 - 작업 pin/unpin, 미지 도구 거부(negative).
 
 ```bash
@@ -154,14 +172,17 @@ KEEP=1 e2e/run.sh     # 검증 후 스택 유지(디버깅)
   스냅샷하므로 **리포트 렌더링은 Agent 비의존**. per-body 8MiB 인라인 상한(초과=oversize,
   truncate 없음). **traffic 패키지의 유일한 Postgres(db) 결합(`db.TemplatePath`)은
   db-free 복제본으로 제거** — Agent 바이너리가 db 를 링크하지 않는 불변식 유지.
+- ~~Agent 호스팅 MCP(서버별 선택적 라우팅)~~ — P2-E. `mcp_servers.agent_hosted=true` 인
+  서버는 샌드박스 Agent 가 호스팅(stdio=샌드박스 자식프로세스; http/sse=샌드박스 엔드포인트).
+  구현의 핵심은 **announce 에 전체 툴 메타(스키마) 추가** — 제어판은 MCP 툴의 로컬 정의가
+  없으므로, Agent 가 보낸 메타로 placeholder 를 만들어 백엔드로 Agent 에 라우팅한다(가시성·
+  skill-gating·unlock 로직 그대로). 설정은 발급 시 번들에 스냅샷(변경=재발급); env(헤더/
+  토큰 등 툴 시크릿)만 Agent 로 가며 **LLM 시크릿은 절대 아님**. 공유 연결 로직은 db-free
+  `mcpconn`(server·Agent 공용). github 등은 종전대로 제어판.
 
 **남은 범위**
 
-1. **Agent 호스팅 MCP(선택적 라우팅)**: 현재 모든 MCP 는 제어판에서 동작합니다(github 등
-   제어판 도구에 적합 — Agent 가 MCP 이름을 announce 하지 않으므로 backend 가 래핑하지
-   않음). "표적 도구 MCP 를 Agent 에서" 하려면 Agent 가 해당 MCP 클라이언트를 호스팅하고
-   그 도구 이름을 announce 하면 됩니다(라우팅 메커니즘은 이미 backend.Executes 로 지원).
-   MCP 설정 전달·전송·수명주기를 Agent 에 추가하는 것이 남은 구현입니다.
+없음 — 사용자 결정 범위의 분리 작업은 모두 완료. 선택적 보완은 "알려진 제약" 참고.
 
 **비범위(결정됨)**
 
@@ -197,6 +218,11 @@ KEEP=1 e2e/run.sh     # 검증 후 스택 유지(디버깅)
 - **Agent 트래픽 스토어의 수명·관리**: Agent 의 SQLite 인덱스·blob 트리는 샌드박스 안에
   있으며, 제어판의 트래픽 삭제/GC/보존 정책(`DeleteHost`/`DeleteAll` 등)은 적용되지
   않습니다. 일회성 샌드박스 전제에서는 스토어가 샌드박스와 함께 폐기되므로 수용 가능합니다.
+- **Agent 호스팅 MCP 의 제약**: (1) 설정은 번들 스냅샷이라 변경 시 재발급 필요(위 참고).
+  (2) 인터넷과 분리된 샌드박스에서는 외부 http/sse MCP 로 나가는 연결이 막히므로, Agent
+  호스팅 MCP 는 stdio(샌드박스 내 프로세스) 또는 샌드박스 네트워크 안의 엔드포인트가
+  적합합니다. 외부 SaaS MCP(github 등)는 제어판 호스팅으로 두세요. (3) UI 체크박스는
+  후속 — 현재 `agent_hosted` 는 MCP API(json) 또는 CLI `-mcp` 로 설정합니다.
 
 ## 코드 지도
 
@@ -205,12 +231,21 @@ KEEP=1 e2e/run.sh     # 검증 후 스택 유지(디버깅)
   백엔드 추상화와 fail-closed(`backend.go`)·in-proc(`inproc.go`)·출구 환경(`egress.go`).
 - `execsvc/` — db/server 비의존 실행 서비스: script·http·dns·httpprobe(`__artex_*`),
   Agent 가 호스팅(모델 비노출, 제어판이 프로그램적으로 호출).
+- `mcpconn/` — db/server 비의존 MCP 연결 헬퍼(transport 무관 Config + Connect:
+  stdio=norma/mcp, http/sse=mcphttp). server·Agent 공용(Agent 가 db 를 링크하지 않도록).
+- `remoteexec/announce.go` — 툴 announce 메타(WireToolMeta), Executor.ToolMetas,
+  CoreToolFromMeta/NewRemoteToolFromMeta(제어판이 로컬 정의 없는 Agent 툴을 프록시).
 - `agentctl/` — 제어판 CA·Agent 레지스트리·리스너/dial·번들 발급·진단 실행·작업 핀(`manager.go`).
 - `cmd/artex-agent/` — 실행면 바이너리(LLM·시크릿·DB 무의존).
 - `cmd/artex/` — `issue-agent` 서브커맨드 추가.
 - `agent/assembly.go` — `AugmentTools` 에서 backend 로 실행계 도구를 RPC 프록시로 래핑
   (`RemoteWebFetchActive`/`InjectRemoteWebFetch`/`ExecBashEnv` 헬퍼, 4개 역할 공통).
-- `server/agents.go` — `/api/exec-agents` 핸들러 + 엔진 backend 리졸버 + enrich 프로버 배선.
+- `server/agents.go` — `/api/exec-agents` 핸들러 + 엔진 backend 리졸버 + enrich 프로버 배선
+  + 번들에 agent-hosted MCP 설정 주입.
+- `server/mcpdiscover.go` — `mcpHostedTools`(agent-hosted 서버는 로컬 연결 대신 announce
+  메타 기반 placeholder) + `agentHostedMCPConfigs`(번들용) + `mcpConfigFromDB`.
+- `server/assembly.go` — MCP 조립 시 agent-hosted 서버를 `mcpHostedTools` 로 처리(로컬
+  connectMCP 스킵).
 - `server/engine.go` — `bindExecBackend` 로 planner/worker 실행 컨텍스트에 backend 주입.
 - `server/customtool.go` — command/script/http 커스텀 도구를 backend/execsvc 로 라우팅.
 - `enrich/enrich.go` — `Prober` 인터페이스로 DNS/HTTP 프로브를 Agent 로(로컬 폴백 포함).
