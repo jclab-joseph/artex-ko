@@ -120,6 +120,16 @@ json.loads(d.get('output','') or '{}')  # output must be valid JSON {a,aaaa,cnam
 print('assertion passed: __artex_dns ran in the sandbox and returned JSON')
 " || fail "dns service assertion failed"
 
+# 7c. Per-task Agent pinning API (multi-agent routing).
+say "Pinning a task to the agent, then unpinning"
+PINCODE="$(curl -s -o /dev/null -w '%{http_code}' "${AUTH[@]}" -X POST "$MGMT_URL/api/exec-agents/$AGENT_ID/pin" \
+  -H 'Content-Type: application/json' -d '{"task_id":"e2e-task-1"}')"
+[[ "$PINCODE" == "200" ]] || fail "pin should succeed (got HTTP $PINCODE)"
+UNPINCODE="$(curl -s -o /dev/null -w '%{http_code}' "${AUTH[@]}" -X POST "$MGMT_URL/api/exec-agents/unpin" \
+  -H 'Content-Type: application/json' -d '{"task_id":"e2e-task-1"}')"
+[[ "$UNPINCODE" == "200" ]] || fail "unpin should succeed (got HTTP $UNPINCODE)"
+ok "pin/unpin ok"
+
 # 8. Negative check: an unknown tool must be rejected by the agent.
 say "Negative check: unknown tool is rejected"
 BADCODE="$(curl -s -o /dev/null -w '%{http_code}' "${AUTH[@]}" -X POST "$MGMT_URL/api/exec-agents/$AGENT_ID/exec" \

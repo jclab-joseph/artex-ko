@@ -132,28 +132,34 @@ func resultText(res *remoteexec.WireResult) string {
 	return s
 }
 
-// resolveExecBackend picks a task's execution backend per the offload policy. Per-task
-// Agent pinning can be layered on later (read a task setting here); for now it is the
-// process-wide policy with "auto"/"require" choosing the newest connected Agent.
-func (s *Server) resolveExecBackend(_ *Task, mode string) remoteexec.Backend {
-	switch mode {
-	case "off":
+// resolveExecBackend picks a task's execution backend per the offload policy. A task
+// pinned to a specific Agent always routes there; otherwise the newest connected Agent
+// is used. Under "require", a missing (or disconnected-pinned) Agent fails closed.
+func (s *Server) resolveExecBackend(t *Task, mode string) remoteexec.Backend {
+	if mode == "off" {
 		return remoteexec.LocalBackend{}
-	case "auto":
-		if b := s.agents.AnyBackend(); b != nil {
-			return b
+	}
+	// Pinned task: route to its Agent, or fail closed / fall back if it is down.
+	if t != nil {
+		if b, pinned := s.agents.PinnedBackend(t.ID); pinned {
+			if b != nil {
+				return b
+			}
+			if mode == "require" {
+				return remoteexec.NewFailClosedBackend("이 작업에 지정된 샌드박스 Agent 가 연결되어 있지 않습니다")
+			}
+			return remoteexec.LocalBackend{} // auto: pinned agent down → local fallback
 		}
-		return remoteexec.LocalBackend{}
-	case "require":
-		if b := s.agents.AnyBackend(); b != nil {
-			return b
-		}
+	}
+	if b := s.agents.AnyBackend(); b != nil {
+		return b
+	}
+	if mode == "require" {
 		// No sandbox connected but policy requires one → fail closed so a dangerous
 		// tool is never run on the control plane.
 		return remoteexec.NewFailClosedBackend("실행 정책이 샌드박스 Agent 를 요구하지만 연결된 Agent 가 없습니다")
-	default:
-		return remoteexec.LocalBackend{}
 	}
+	return remoteexec.LocalBackend{}
 }
 
 // --- HTTP handlers -------------------------------------------------------------
@@ -243,6 +249,40 @@ func (s *Server) agentsDial(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, a)
+}
+
+type pinReq struct {
+	TaskID string `json:"task_id"`
+}
+
+// agentsPin binds a task to a specific execution Agent (multi-agent routing). The
+// task's subsequent tool calls route to that Agent.
+func (s *Server) agentsPin(w http.ResponseWriter, r *http.Request) {
+	if !s.agentsReady(w) {
+		return
+	}
+	id := r.PathValue("id")
+	var req pinReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.TaskID) == "" {
+		writeErr(w, http.StatusBadRequest, "task_id 가 필요합니다")
+		return
+	}
+	s.agents.PinTask(strings.TrimSpace(req.TaskID), id)
+	writeJSON(w, http.StatusOK, map[string]any{"task_id": req.TaskID, "agent_id": id})
+}
+
+// agentsUnpin clears a task's Agent pin (falls back to any-agent routing).
+func (s *Server) agentsUnpin(w http.ResponseWriter, r *http.Request) {
+	if !s.agentsReady(w) {
+		return
+	}
+	var req pinReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.TaskID) == "" {
+		writeErr(w, http.StatusBadRequest, "task_id 가 필요합니다")
+		return
+	}
+	s.agents.UnpinTask(strings.TrimSpace(req.TaskID))
+	writeJSON(w, http.StatusOK, map[string]any{"task_id": req.TaskID, "unpinned": true})
 }
 
 type execReq struct {

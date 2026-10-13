@@ -46,6 +46,9 @@ type Manager struct {
 	// issued records agent ids we handed out a bundle for but have not yet seen
 	// connect — purely informational for the UI.
 	issued map[string]time.Time
+	// pins binds a task id to a specific Agent id, so a task's execution always lands
+	// in one chosen sandbox (multi-agent routing). Absent → "any connected Agent".
+	pins map[string]string
 
 	listener *remoteexec.AgentListener
 }
@@ -58,6 +61,7 @@ func NewManager(dataDir string) (*Manager, error) {
 		dataDir: dataDir,
 		agents:  map[string]*Agent{},
 		issued:  map[string]time.Time{},
+		pins:    map[string]string{},
 	}
 	if err := m.loadOrInitPKI(); err != nil {
 		return nil, err
@@ -227,6 +231,44 @@ func (m *Manager) Backend(agentID string) remoteexec.Backend {
 		return a.backend
 	}
 	return nil
+}
+
+// PinTask binds a task to a specific Agent id (multi-agent routing). Pass an empty
+// agentID (or call UnpinTask) to clear.
+func (m *Manager) PinTask(taskID, agentID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if agentID == "" {
+		delete(m.pins, taskID)
+		return
+	}
+	m.pins[taskID] = agentID
+}
+
+// UnpinTask clears a task's Agent pin.
+func (m *Manager) UnpinTask(taskID string) { m.PinTask(taskID, "") }
+
+// PinnedAgentID returns the Agent id pinned to a task, or "".
+func (m *Manager) PinnedAgentID(taskID string) string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.pins[taskID]
+}
+
+// PinnedBackend returns (backend, true) when the task is pinned to a specific Agent;
+// backend is nil within that pair when the pinned Agent is not currently connected.
+// (ok=false means no pin — the caller should fall back to AnyBackend.)
+func (m *Manager) PinnedBackend(taskID string) (remoteexec.Backend, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	agentID, ok := m.pins[taskID]
+	if !ok {
+		return nil, false
+	}
+	if a := m.agents[agentID]; a != nil {
+		return a.backend, true
+	}
+	return nil, true // pinned but disconnected
 }
 
 // AnyBackend returns the backend of the most-recently connected live Agent, or nil.

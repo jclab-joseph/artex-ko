@@ -1054,7 +1054,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/exec-agents", s.agentsList)
 	mux.HandleFunc("POST /api/exec-agents/bundle", s.agentsIssueBundle)
 	mux.HandleFunc("POST /api/exec-agents/dial", s.agentsDial)
+	mux.HandleFunc("POST /api/exec-agents/unpin", s.agentsUnpin)
 	mux.HandleFunc("POST /api/exec-agents/{id}/exec", s.agentsExec)
+	mux.HandleFunc("POST /api/exec-agents/{id}/pin", s.agentsPin)
 
 	// /api/* goes through CORS + JWT; everything else is served by the embedded
 	// frontend (public — auth is enforced client-side and on the API). With the
