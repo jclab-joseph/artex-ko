@@ -119,7 +119,7 @@ func DialAgent(ctx context.Context, addr string, mgmtID Identity, caPEM, agentID
 func startAgentSession(conn net.Conn, agentID string, exec *Executor) *Session {
 	sess := newSession(conn, "agent", exec)
 	sess.startKeepalive(keepaliveInterval)
-	sess.sendHello(agentID, exec.ToolNames())
+	sess.sendHello(agentID, exec.ToolNames(), exec.ToolMetas())
 	return sess
 }
 

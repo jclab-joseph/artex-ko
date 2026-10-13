@@ -13,7 +13,7 @@ func InProcess(exec *Executor) (mgmt *Session, backend *RemoteBackend, closeFn f
 	a, b := net.Pipe()
 	agentSess := newSession(a, "agent", exec)
 	mgmtSess := newSession(b, "mgmt", nil)
-	agentSess.sendHello("in-process", exec.ToolNames())
+	agentSess.sendHello("in-process", exec.ToolNames(), exec.ToolMetas())
 	backend = NewRemoteBackend(mgmtSess, exec.ToolNames())
 	closeFn = func() {
 		mgmtSess.Close()

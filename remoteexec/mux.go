@@ -271,8 +271,8 @@ func (s *Session) Emit(event string, body any) error {
 
 // sendHello announces this peer's identity and tool set. The Agent calls it right
 // after connecting.
-func (s *Session) sendHello(agentID string, tools []string) {
-	s.send(&Frame{Kind: KindHello, AgentID: agentID, Tools: tools})
+func (s *Session) sendHello(agentID string, tools []string, metas []WireToolMeta) {
+	s.send(&Frame{Kind: KindHello, AgentID: agentID, Tools: tools, ToolMetas: metas})
 }
 
 // waitHello blocks for the peer's hello (the Agent's announcement) or ctx/close.

@@ -89,6 +89,12 @@ type Frame struct {
 	// Hello fields (KindHello).
 	AgentID string   `json:"agent_id,omitempty"`
 	Tools   []string `json:"tools,omitempty"`
+	// ToolMetas carries full metadata (name/description/schema) for announced tools
+	// Management cannot construct locally — notably Agent-hosted MCP tools, whose
+	// schemas live only on the Agent that connected to the MCP server. Additive and
+	// optional: a peer that sends only Tools still works; Management falls back to
+	// its own local metas for every name it already knows.
+	ToolMetas []WireToolMeta `json:"tool_metas,omitempty"`
 
 	// Event fields (KindEvent): a named event with an opaque JSON body, decoded by
 	// whoever registered for that event name.

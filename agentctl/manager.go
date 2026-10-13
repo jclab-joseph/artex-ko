@@ -16,6 +16,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 
@@ -31,8 +32,9 @@ type Agent struct {
 	ConnectedAt time.Time           `json:"connected_at"`
 	RemoteAddr  string              `json:"remote_addr,omitempty"`
 
-	sess    *remoteexec.Session
-	backend *remoteexec.RemoteBackend
+	sess      *remoteexec.Session
+	backend   *remoteexec.RemoteBackend
+	toolMetas []remoteexec.WireToolMeta // announced metadata (for tools Mgmt can't build locally, e.g. Agent-hosted MCP)
 }
 
 // Manager is the control-plane agent registry + CA.
@@ -199,6 +201,7 @@ func (m *Manager) register(sess *remoteexec.Session, hello *remoteexec.Frame, mo
 		ConnectedAt: time.Now(),
 		sess:        sess,
 		backend:     remoteexec.NewRemoteBackend(sess, hello.Tools),
+		toolMetas:   hello.ToolMetas,
 	}
 	m.mu.Lock()
 	// If an agent id reconnects, replace the stale entry.
@@ -325,6 +328,28 @@ func (m *Manager) List() []Agent {
 	out := make([]Agent, 0, len(m.agents))
 	for _, a := range m.agents {
 		out = append(out, Agent{ID: a.ID, Mode: a.Mode, Tools: a.Tools, ConnectedAt: a.ConnectedAt, RemoteAddr: a.RemoteAddr})
+	}
+	return out
+}
+
+// AnnouncedMetas returns announced tool metadata across connected agents, keyed by
+// tool name (newest-connected agent wins on conflict). Management uses it to build
+// placeholders for tools it has no local definition of — notably Agent-hosted MCP
+// tools, whose schemas live only on the Agent that connected to the MCP server.
+func (m *Manager) AnnouncedMetas() map[string]remoteexec.WireToolMeta {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	// Fill oldest-first so a newer agent's meta overwrites an older one's.
+	agents := make([]*Agent, 0, len(m.agents))
+	for _, a := range m.agents {
+		agents = append(agents, a)
+	}
+	sort.Slice(agents, func(i, j int) bool { return agents[i].ConnectedAt.Before(agents[j].ConnectedAt) })
+	out := map[string]remoteexec.WireToolMeta{}
+	for _, a := range agents {
+		for _, meta := range a.toolMetas {
+			out[meta.Name] = meta
+		}
 	}
 	return out
 }

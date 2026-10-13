@@ -54,6 +54,23 @@ func TestManagerAgentDialsRoundtrip(t *testing.T) {
 		t.Fatalf("unexpected agent list: %+v", agents)
 	}
 
+	// Announced metadata must carry each tool's full schema (not just its name), so
+	// Management can build placeholders/proxies for tools it has no local code for
+	// (Agent-hosted MCP relies on this). Bash is always announced with an input schema.
+	metas := mgr.AnnouncedMetas()
+	bash, ok := metas["Bash"]
+	if !ok {
+		t.Fatalf("AnnouncedMetas missing Bash: %v", keys(metas))
+	}
+	if len(bash.Schema) == 0 || !strings.Contains(string(bash.Schema), "command") {
+		t.Fatalf("Bash announced schema missing/empty: %q", string(bash.Schema))
+	}
+	// A proxy rebuilt purely from the announced meta must preserve name + schema.
+	rebuilt := remoteexec.CoreToolFromMeta(bash)
+	if rebuilt.Name() != "Bash" || rebuilt.InputSchema()["properties"] == nil {
+		t.Fatalf("CoreToolFromMeta lost metadata: name=%q schema=%v", rebuilt.Name(), rebuilt.InputSchema())
+	}
+
 	// Run Bash through the manager, as the HTTP exec handler does.
 	input, _ := json.Marshal(map[string]string{"command": "echo manager-e2e-ok"})
 	res, err := mgr.Exec(ctx, "e2e-agent", "Bash", input)
@@ -85,6 +102,14 @@ func TestFailClosedWhenNoAgent(t *testing.T) {
 	if b.Executes("record_fact") {
 		t.Fatal("fail-closed backend must not block data/graph tools")
 	}
+}
+
+func keys(m map[string]remoteexec.WireToolMeta) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
 }
 
 func waitFor(d time.Duration, cond func() bool) bool {

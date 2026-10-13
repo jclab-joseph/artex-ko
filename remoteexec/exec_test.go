@@ -166,7 +166,7 @@ func runMTLSRoundtrip(t *testing.T, mode ConnMode) {
 				return
 			}
 			s := newSession(conn, "agent", exec)
-			s.sendHello(agentID, exec.ToolNames())
+			s.sendHello(agentID, exec.ToolNames(), exec.ToolMetas())
 			agentSessCh <- s
 		}()
 
