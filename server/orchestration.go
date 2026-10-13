@@ -83,6 +83,19 @@ func (s *Server) trafficHostTools() []actool.CoreTool {
 	return nil
 }
 
+// trafficRecordingActive reports whether target traffic is being recorded for this
+// deployment — a local MITM (monolith) OR a sandbox Agent hosting the recorder
+// (split mode). It mirrors trafficHostTools' injection condition exactly, so the
+// worker's traffic-tool prompt note appears precisely when traffic_* are callable.
+// Without this, split mode would register the tools but never tell the model to use
+// them (the old signal was the local MITM's CA, absent when Mgmt runs -proxy "").
+func (s *Server) trafficRecordingActive() bool {
+	if !s.m.TrafficEnabled() {
+		return false
+	}
+	return s.m.traffic != nil || s.offloadMode() != "off"
+}
+
 // orchestrationTools returns the cross-task tool set. Bound per-agent via the
 // tools table (default: no binding — opt-in for orchestration agents).
 func (s *Server) orchestrationTools() []actool.CoreTool {
