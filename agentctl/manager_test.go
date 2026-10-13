@@ -181,6 +181,40 @@ func TestAgentHostedMCPToolRouting(t *testing.T) {
 	}
 }
 
+// TestAgentDialsRejectsIdSpoof proves Management binds the registered agent id to the
+// mTLS client certificate: a CA-valid Agent holding a cert for "alice" cannot register
+// under "bob" by announcing a different id in its hello (보안 리뷰 F8).
+func TestAgentDialsRejectsIdSpoof(t *testing.T) {
+	dir := t.TempDir()
+	mgr, err := NewManager(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := mgr.StartListener(ctx, "127.0.0.1:0"); err != nil {
+		t.Fatal(err)
+	}
+	// Issue a cert bound to "alice", then tamper the announced id to "bob". The TLS cert
+	// (from bundle.Identity) still carries CN artex-agent:alice.
+	bundle, err := mgr.IssueBundle(remoteexec.ModeAgentDials, mgr.listener.Addr().String(), "alice", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle.AgentID = "bob"
+
+	exec := remoteexec.NewExecutor(remoteexec.DefaultAgentTools("", "", false), t.TempDir(), nil)
+	sess, _ := remoteexec.ConnectAgentSide(ctx, bundle, exec)
+	if sess != nil {
+		defer sess.Close()
+	}
+	// Management must reject the identity mismatch: nothing registers under "bob" or
+	// "alice".
+	if waitFor(1500*time.Millisecond, func() bool { return mgr.HasLive() }) {
+		t.Fatalf("id-spoofed agent must not register, got: %+v", mgr.List())
+	}
+}
+
 func keys(m map[string]remoteexec.WireToolMeta) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {

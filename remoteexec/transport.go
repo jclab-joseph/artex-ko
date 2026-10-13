@@ -8,6 +8,37 @@ import (
 	"time"
 )
 
+// peerCertCN returns the CommonName of the TLS peer's leaf certificate. The caller must
+// invoke it only after the handshake has completed (e.g. after waitHello), so the peer
+// certificates are populated. It is how Management binds the agent id a connection
+// registers under to the certificate the peer actually presented — a CA-valid cert can no
+// longer claim another agent's id in its hello (보안 리뷰 F8).
+func peerCertCN(conn net.Conn) (string, error) {
+	tc, ok := conn.(*tls.Conn)
+	if !ok {
+		return "", fmt.Errorf("remoteexec: connection is not TLS")
+	}
+	st := tc.ConnectionState()
+	if len(st.PeerCertificates) == 0 {
+		return "", fmt.Errorf("remoteexec: peer presented no certificate")
+	}
+	return st.PeerCertificates[0].Subject.CommonName, nil
+}
+
+// bindAgentIdentity verifies the peer's certificate CN matches the agent id it announced
+// in hello, so a connection is registered under the identity it proved, not one it merely
+// claimed. Returns an error (the caller closes the session) on any mismatch.
+func bindAgentIdentity(conn net.Conn, hello *Frame) error {
+	cn, err := peerCertCN(conn)
+	if err != nil {
+		return err
+	}
+	if want := agentCN(hello.AgentID); cn != want {
+		return fmt.Errorf("remoteexec: agent cert CN %q does not match announced id %q", cn, want)
+	}
+	return nil
+}
+
 // keepaliveInterval is the application-level ping cadence on an established session.
 const keepaliveInterval = 20 * time.Second
 
@@ -86,6 +117,12 @@ func (l *AgentListener) Accept(ctx context.Context) (*Session, *Frame, error) {
 		sess.Close()
 		return nil, nil, fmt.Errorf("remoteexec: waiting for agent hello: %w", err)
 	}
+	// Bind the announced agent id to the mTLS client cert: a CA-valid Agent cannot
+	// register under another Agent's id (보안 리뷰 F8).
+	if err := bindAgentIdentity(conn, hello); err != nil {
+		sess.Close()
+		return nil, nil, err
+	}
 	return sess, hello, nil
 }
 
@@ -112,6 +149,13 @@ func DialAgent(ctx context.Context, addr string, mgmtID Identity, caPEM, agentID
 	if err != nil {
 		sess.Close()
 		return nil, nil, fmt.Errorf("remoteexec: waiting for agent hello: %w", err)
+	}
+	// The dial already pinned the cert CN to agentID; also bind the hello's self-declared
+	// id to that same cert, so a listening Agent cannot register under a different id than
+	// the one it proved (보안 리뷰 F8).
+	if err := bindAgentIdentity(conn, hello); err != nil {
+		sess.Close()
+		return nil, nil, err
 	}
 	return sess, hello, nil
 }

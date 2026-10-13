@@ -159,9 +159,16 @@ func (ca *CA) issueLeaf(cn string, ttl time.Duration, server, client bool) (Iden
 	}, nil
 }
 
-// agentCN is the canonical CommonName for an Agent's leaf, carrying the agent id so
-// Management can pin on it in ModeMgmtDials.
+// agentCN is the canonical CommonName for an Agent's leaf, carrying the agent id so the
+// peer can pin on it AND so the agent id a connection registers under can be bound to the
+// certificate it presented (not merely to the self-declared hello).
 func agentCN(agentID string) string { return "artex-agent:" + agentID }
+
+// mgmtCN is the canonical CommonName for the Management Server's leaf. The Agent pins on
+// it in both directions (ModeAgentDials client verify, ModeMgmtDials listener role check)
+// so that only Management — not another Agent that shares the same CA — can establish or
+// accept a control connection.
+const mgmtCN = "artex-management"
 
 // IssueAgent signs a short-lived (AgentCertTTL) client+server cert for an Agent. It is
 // both client and server capable so the one cert works in either ConnMode.
@@ -171,7 +178,7 @@ func (ca *CA) IssueAgent(agentID string) (Identity, error) {
 
 // IssueManagement signs the Management Server's long-lived client+server cert.
 func (ca *CA) IssueManagement() (Identity, error) {
-	return ca.issueLeaf("artex-management", managementCertTTL, true, true)
+	return ca.issueLeaf(mgmtCN, managementCertTTL, true, true)
 }
 
 // Bundle is the connection information Management generates and the user injects into
@@ -250,8 +257,37 @@ func pinnedVerifier(pool *x509.CertPool, wantCN string) func([][]byte, [][]*x509
 	}
 }
 
+// cnVerifier returns a VerifyPeerCertificate that binds the peer's ROLE: the already-CA-
+// verified leaf must carry exactly wantCN. Unlike pinnedVerifier it does not re-verify the
+// chain (the stdlib did, via RequireAndVerifyClientCert); it exists to reject a cert that
+// is valid under the CA but carries the wrong identity — e.g. another Agent's cert dialing
+// an Agent listener as though it were Management (보안 리뷰 F8).
+func cnVerifier(wantCN string) func([][]byte, [][]*x509.Certificate) error {
+	return func(rawCerts [][]byte, verified [][]*x509.Certificate) error {
+		var leaf *x509.Certificate
+		switch {
+		case len(verified) > 0 && len(verified[0]) > 0:
+			leaf = verified[0][0]
+		case len(rawCerts) > 0:
+			c, err := x509.ParseCertificate(rawCerts[0])
+			if err != nil {
+				return err
+			}
+			leaf = c
+		default:
+			return errors.New("remoteexec: peer presented no certificate")
+		}
+		if leaf.Subject.CommonName != wantCN {
+			return fmt.Errorf("remoteexec: peer cert CN %q != expected %q", leaf.Subject.CommonName, wantCN)
+		}
+		return nil
+	}
+}
+
 // AgentListenerTLS builds the server-side config for ModeMgmtDials (the Agent listens).
-// It requires and verifies Management's client cert against the CA.
+// It requires and verifies the dialing peer's client cert against the CA AND binds the
+// role: only the Management Server (CN mgmtCN) may connect, never another Agent that
+// happens to hold a cert from the same CA (보안 리뷰 F8).
 func AgentListenerTLS(bundle *Bundle) (*tls.Config, error) {
 	cert, err := bundle.Identity.TLSCertificate()
 	if err != nil {
@@ -262,10 +298,11 @@ func AgentListenerTLS(bundle *Bundle) (*tls.Config, error) {
 		return nil, err
 	}
 	return &tls.Config{
-		Certificates: []tls.Certificate{cert},
-		ClientCAs:    pool,
-		ClientAuth:   tls.RequireAndVerifyClientCert,
-		MinVersion:   tls.VersionTLS12,
+		Certificates:          []tls.Certificate{cert},
+		ClientCAs:             pool,
+		ClientAuth:            tls.RequireAndVerifyClientCert,
+		VerifyPeerCertificate: cnVerifier(mgmtCN),
+		MinVersion:            tls.VersionTLS12,
 	}, nil
 }
 
@@ -326,7 +363,7 @@ func AgentDialTLS(bundle *Bundle) (*tls.Config, error) {
 		Certificates:          []tls.Certificate{cert},
 		RootCAs:               pool,
 		InsecureSkipVerify:    true,
-		VerifyPeerCertificate: pinnedVerifier(pool, "artex-management"),
+		VerifyPeerCertificate: pinnedVerifier(pool, mgmtCN),
 		MinVersion:            tls.VersionTLS12,
 	}, nil
 }
