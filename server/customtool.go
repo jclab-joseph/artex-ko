@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/Autumn-27/artex/db"
+	"github.com/Autumn-27/artex/remoteexec"
 	"github.com/Autumn-27/norma/permission"
 	actool "github.com/Autumn-27/norma/tool"
 )
@@ -357,7 +358,11 @@ func (s *Server) runCommandTool(ctx context.Context, execRaw json.RawMessage, pa
 		ctx, cancel = context.WithTimeout(ctx, timeoutOr(spec.TimeoutMs, 120000))
 		defer cancel()
 	}
-	return actool.NewBash().Call(ctx, bashIn, tc)
+	// 执行面分离:命令类自定义工具的底层 Bash 也要在沙箱 Agent 里跑(任意 shell 命令是
+	// 最危险的面)。backend 把 Bash.Call 路由到 Agent;未绑定(单进程)时 LocalBackend
+	// 原样返回,行为不变。
+	bash := remoteexec.BackendFrom(ctx).Wrap(actool.NewBash())
+	return bash.Call(ctx, bashIn, tc)
 }
 
 // ---------- script(仅 Python):临时文件 + stdin JSON + env ----------
