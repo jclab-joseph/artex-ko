@@ -133,6 +133,11 @@ var logCatalog = map[string]map[string]string{
 		"zh": "[mcp] 从 %s 发现并缓存了 %d 个工具",
 		"es": "[mcp] desde %s, se descubrieron y almacenaron en caché %d herramienta(s)",
 	},
+	"[mcp] %s(agent-hosted) announce 에서 도구 %d개를 캐시했습니다": {
+		"en": "[mcp] from the %s(agent-hosted) announce, cached %d tool(s)",
+		"zh": "[mcp] 从 %s(agent-hosted) 的 announce 缓存了 %d 个工具",
+		"es": "[mcp] desde el announce de %s(agent-hosted), se almacenaron en caché %d herramienta(s)",
+	},
 	"[mcp] 시작 시 자동 발견: 목록을 읽지 못했습니다: %v": {
 		"en": "[mcp] auto-discovery at startup: failed to read the list: %v",
 		"zh": "[mcp] 启动时自动发现：读取列表失败：%v",
