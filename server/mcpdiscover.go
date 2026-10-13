@@ -37,6 +37,10 @@ const (
 	errMCPHTTPNoURL           = "http 전송 방식에 URL 이 없습니다"
 	errMCPSSENoURL            = "sse 전송 방식에 URL 이 없습니다"
 	errMCPUnknownTransportFmt = "알 수 없는 전송 방식입니다: %q"
+	// Agent-hosted MCP discovery needs a connected Agent (it comes from the Agent's
+	// announced tool metadata, never a control-plane connection). Surfaced to the user by
+	// pgRefreshMCP when they refresh an agent-hosted server with no Agent connected.
+	errMCPAgentHostedNoAgentFmt = "agent-hosted MCP %q: 연결된 샌드박스 Agent 가 없어 도구를 발견할 수 없습니다(Agent 연결 후 다시 시도하세요)"
 )
 
 // mcpConfigFromDB projects a stored MCP row into the db-free mcpconn.Config shared
@@ -118,6 +122,24 @@ func connectMCP(ctx context.Context, m *db.MCPServer) (mcpClient, error) {
 // discoverAndCacheMCP connects to one MCP, lists its tools, and persists the tool
 // names to mcp_tools_cache so the UI shows them without a live connection.
 func (s *Server) discoverAndCacheMCP(ctx context.Context, m *db.MCPServer) error {
+	// Agent-hosted servers run INSIDE the sandbox: never connect them on the control
+	// plane (that would spawn the stdio child / open the endpoint here — 보안 리뷰 F6).
+	// Discover from the Agent's announced tool metadata instead. This covers both startup
+	// auto-discovery and manual refresh, which previously both called connectMCP locally.
+	if tools, hosted := s.mcpHostedTools(m); hosted {
+		if len(tools) == 0 {
+			return fmt.Errorf(trMsg(errMCPAgentHostedNoAgentFmt), m.Name)
+		}
+		cached := make([]db.MCPTool, 0, len(tools))
+		for _, t := range tools {
+			cached = append(cached, db.MCPTool{Name: t.Name(), Description: t.Description()})
+		}
+		if err := s.m.pg.SaveMCPTools(m.ID, cached); err != nil {
+			return err
+		}
+		log.Printf(logT("[mcp] %s(agent-hosted) announce 에서 도구 %d개를 캐시했습니다"), m.Name, len(cached))
+		return nil
+	}
 	cl, err := connectMCP(ctx, m)
 	if err != nil {
 		return err
