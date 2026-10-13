@@ -186,6 +186,41 @@ MCP 서버를 Agent(샌드박스)에서 호스팅하려면 두 경로가 있습�
 제어 플레인 egress 는 종전처럼 인터넷 자유 연결입니다. Bash(스캐너 포함)·WebFetch·파일 I/O 는
 Agent 로, web_search 는 제어 플레인에 남습니다.
 
+## 실행 격리 불변식 (보안 강화)
+
+핵심 불변식: **Management 가 실행 도구의 위치를 결정하고, Agent 의 announce 는 "지금 원격
+실행 가능한지"만 결정한다.** 실행 도구인데 backend·연결·capability 가 없으면 **차단**하며,
+제어 플레인에서 로컬 실행으로 폴백하지 않는다. "등록 안 됨 = 로컬"이라는 fail-open 기본값은
+누락된 진입점마다 격리를 해제하므로 제거했다.
+
+- **실행 도구 분류(단일 권위 소스)**: `remoteexec.IsExecTool`/`ExecToolNames` — 파일·Bash·
+  Sleep·WebFetch + 대화형 셸(`shell_*`) + 백그라운드(`Monitor`/`Task*`) + db-free 서비스
+  (`__artex_script/http/dns/httpprobe`). `RemoteBackend.Wrap` 은 announce 된 도구는 원격
+  프록시, announce 안 된 **실행 도구는 차단**(blockedTool), 비실행(데이터/그래프)만 in-process.
+  `FailClosedBackend` 는 이 전체 집합을 차단.
+- **모든 실행 진입점에 backend 적용**: planner/worker(엔진 루프)뿐 아니라 일반 대화(`ca.Chat`)·
+  작업 채팅(`ma.Chat`)·재검증·커스텀 도구 시험 실행(`pgTestCustomTool`)도 `bindExecCtx` 로
+  오프로드 정책을 적용. 대화는 Agent 선택이 없으므로 pinned/require + 미연결 시 fail-closed
+  (실행 도구만 차단, 대화 응답은 유지).
+- **대화형 셸·백그라운드 작업은 Agent 호스팅**: 세션 상태(live PTY·백그라운드 프로세스)가
+  `tc.Tasks` 매니저에 사는 특성상 Agent 가 호스팅(`remoteexec.AgentSessionTools` +
+  `Executor.EnableBackgroundTasks`). 제어 플레인 역할은 `opts.DisableBackgroundTasks=
+  RemoteExecActive` 로 SDK 의 로컬 주입을 끄고 원격 프록시(`InjectRemoteBackgroundTools`)로
+  대체. (백그라운드 완료 자동 알림은 Agent 에 남으므로 split 모드에선 `TaskOutput` 폴링.)
+- **MCP 발견도 Agent 경유**: `agent_hosted` 서버는 `discoverAndCacheMCP` 가 로컬 connect 하지
+  않고 Agent announce 메타에서 도구를 캐시(시작 자동 발견·수동 새로고침 공통). 미연결 시 로컬
+  폴백 없이 오류.
+- **초기화 실패 fail-closed**: `agentctl.NewManager` 실패 시 require/pinned 에선 엔진 resolver·
+  실행 준비 게이트·enrich 프로버·`bindExecCtx` 네 경로 모두 차단을 유지(로컬 폴백 없음).
+- **인증서 신원·역할 결합(mTLS)**: 등록 ID ↔ cert CN 결합(Accept/DialAgent 에서
+  `peerCertCN == agentCN(hello.AgentID)`), Agent 리스너는 다이얼 피어가 Management 역할
+  (`CN=artex-management`)인지 검증. 침해된 Agent 가 다른 Agent 를 사칭·제어할 수 없다.
+- **enrich 프로브의 작업 경계**: 프로브는 ctx 의 작업 id 로 해당 작업의 고정 Agent 에서 실행
+  (pinned 에서 고정 Agent 미연결 시 다른 샌드박스로 새지 않고 오류).
+
+단위 테스트: `remoteexec`(분류·fail-closed 반전·Agent 호스팅·management-role 검증자),
+`agentctl`(agent-dials ID 사칭 등록 거부). 미연결 fail-closed 는 단위 테스트로 커버.
+
 ## e2e
 
 `e2e/run.sh` 는 바이너리 2종을 빌드하고 `e2e/docker-compose.yml`(postgres+management+
@@ -196,6 +231,8 @@ mTLS 로** 다음을 검증합니다(LLM 키 불필요):
 - **mgmt-dials-agent(역방향)**: `agent-md` 가 `:8791` 에서 수신하고, 제어 플레인이
   `POST /api/exec-agents/dial` 로 접속해 등록 후 그 채널로 Bash 실행,
 - `__artex_dns` 실행 서비스,
+- **Agent 호스팅 대화형 셸·백그라운드**: `shell_list`(Agent 매니저 조회) + `Monitor`
+  (샌드박스에서 백그라운드 프로세스 기동)를 채널로 구동,
 - 샌드박스 트래픽 캡처→조회: Agent 가 자신의 호스팅 레코더를 거쳐 `http://target/` 를
   fetch 한 뒤 제어 플레인이 `traffic_search` 로 캡처된 교환을 되받음,
 - 증거 동기화: `__artex_traffic_evidence` 로 교환 원문 바이트(base64)를 샌드박스에서 가져옴,

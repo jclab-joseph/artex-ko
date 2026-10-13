@@ -157,6 +157,31 @@ json.loads(d.get('output','') or '{}')  # output must be valid JSON {a,aaaa,cnam
 print('assertion passed: __artex_dns ran in the sandbox and returned JSON')
 " || fail "dns service assertion failed"
 
+# 7b-exec-hosting. Interactive shell + background tasks now run IN THE SANDBOX (보안 리뷰
+#   F1/F5): the Agent hosts the shell session tools (shell_*) and the background-task
+#   Manager (Monitor/Task*). Previously the SDK injected these on the control plane. Drive
+#   shell_list (reads the Agent's Manager) and Monitor (spawns a background process in the
+#   sandbox) over the channel and assert both ran there without error.
+say "Exercising Agent-hosted interactive shell + background tasks (shell_list, Monitor)"
+SHRESP="$(curl -fsS "${AUTH[@]}" -X POST "$MGMT_URL/api/exec-agents/$AGENT_ID/exec" \
+  -H 'Content-Type: application/json' -d '{"tool":"shell_list","input":{}}')"
+echo "$SHRESP" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+assert d.get('is_error') is not True, 'shell_list errored (shell tools not hosted on agent?): %r' % d
+print('assertion passed: shell_list ran on the Agent (interactive shell hosted in sandbox)')
+" || fail "agent-hosted shell_list failed"
+MONRESP="$(curl -fsS "${AUTH[@]}" -X POST "$MGMT_URL/api/exec-agents/$AGENT_ID/exec" \
+  -H 'Content-Type: application/json' -d '{"tool":"Monitor","input":{"command":"echo e2e-monitor; sleep 1","description":"e2e"}}')"
+echo "$MONRESP" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+assert d.get('is_error') is not True, 'Monitor errored (background manager not hosted on agent?): %r' % d
+out = d.get('output','')
+assert ('Output file' in out) or ('monitor' in out.lower()), 'Monitor did not start a background task: %r' % d
+print('assertion passed: Monitor spawned a background task IN the sandbox')
+" || fail "agent-hosted Monitor failed"
+
 # 7b-traffic. Prove the recording store is HOSTED IN THE SANDBOX: make the Agent fetch
 #   a target through its own hosted recorder (Bash+curl egress → recorder → target),
 #   then drive traffic_search from Management THROUGH the Agent and assert the captured
