@@ -74,17 +74,55 @@ mTLS 연결 위에서 프레임 멀티플렉서(`remoteexec`)가 호출/결과/�
 ### 연결 번들
 
 제어 플레인은 "연결 정보"만 만들고, 샌드박스 실행은 사용자가 직접 합니다. 번들은
-`{mode, agent_id, address, ca_cert, agent_cert+key, expires}` JSON 입니다.
+`{mode, agent_id, address, ca_cert, agent_cert+key, expires}` JSON 입니다. `-address`
+의 의미는 **모드에 따라 다릅니다**(아래).
+
+#### A) agent-dials-mgmt — Agent 가 제어 플레인으로 접속 (기본·권장)
+
+샌드박스가 **아웃바운드**로 제어 플레인에 닿을 수 있을 때. 제어 플레인이 수신 대기하고
+Agent 가 dial-in 합니다.
 
 ```bash
-# 제어 플레인 호스트(CA 가 있는 data 디렉터리)에서 발급
+# 제어 플레인: Agent 접속 수신 (ARTEX_AGENT_LISTEN) + 분리 정책
+ARTEX_AGENT_LISTEN=:8790 ARTEX_AGENT_OFFLOAD=require artex -addr :8787 -data /app/data
+
+# 번들 발급 (-address = Agent 가 접속할 "제어 플레인" host:port)
 artex issue-agent -data /app/data -mode agent-dials-mgmt \
   -address management.example.com:8790 -id prod-agent-1 -out bundle.json
 
-# 사용자가 자기 샌드박스 안에서 Agent 실행
-artex-agent --bundle bundle.json --work /work \
-  --egress-proxy http://127.0.0.1:8788 --egress-ca /work/_ca/mitmproxy-ca-cert.pem
+# 사용자가 자기 샌드박스 안에서 Agent 실행 (제어 플레인으로 dial)
+artex-agent --bundle bundle.json --work /work --traffic
 ```
+
+#### B) mgmt-dials-agent — 제어 플레인이 Agent 로 접속
+
+샌드박스가 아웃바운드를 못 하고 **제어 플레인이 샌드박스로 인바운드** 접속만 가능할 때
+(방화벽·격리 정책 등). 이 모드에선 **Agent 가 listen**, 제어 플레인이 dial 합니다. 제어
+플레인은 수신하지 않으므로 `ARTEX_AGENT_LISTEN` 은 필요 없습니다.
+
+```bash
+# 번들 발급 (-address = Agent 가 "listen" 할 샌드박스 내 바인드 host:port)
+artex issue-agent -data /app/data -mode mgmt-dials-agent \
+  -address 0.0.0.0:8791 -id prod-agent-1 -out bundle.json
+
+# 사용자가 샌드박스 안에서 Agent 실행 → 8791 에서 수신 대기(연결 끊기면 자동 재수신)
+artex-agent --bundle bundle.json --work /work --traffic
+
+# 제어 플레인에서 Agent 로 접속. address = Management 에서 "실제로 닿는" Agent host:port
+# (NAT/포트매핑이면 바인드 주소와 다를 수 있음). 연결이 끊겨도 /dial 로 재접속.
+curl -X POST "$MGMT/api/exec-agents/dial" -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"agent_id":"prod-agent-1","address":"10.0.0.5:8791"}'
+# 또는 웹 UI: 시스템 → 실행 Agent → "Agent 로 접속"
+```
+
+> mgmt-dials 연결 시 **hostname 검증은 생략**되고(샌드박스 주소가 가변·NAT 뒤일 수 있음),
+> 대신 CA 서명 + CommonName(`artex-agent:<id>`) 핀으로 신원을 고정 검증합니다(상호 mTLS
+> 유지). Agent 는 발급된 10일 인증서로 자신을 증명하고, 제어 플레인도 CA 가 서명한
+> 클라이언트 인증서를 제시합니다.
+
+트래픽 기록을 샌드박스에서 하려면 `--traffic`(+ 필요 시 `--egress-proxy`/`--egress-ca`),
+Agent 호스팅 MCP 는 발급 시 `-mcp <file.json>` 를 더합니다.
 
 HTTP API 로도 발급·조회할 수 있습니다(로그인 필요):
 
@@ -151,10 +189,12 @@ Agent 로, web_search 는 제어 플레인에 남습니다.
 ## e2e
 
 `e2e/run.sh` 는 바이너리 2종을 빌드하고 `e2e/docker-compose.yml`(postgres+management+
-provision+agent+target)를 띄운 뒤, 제어 플레인에서 **Agent 를 거쳐 mTLS 로** 다음을 검증합니다
-(LLM 키 불필요):
+provision+agent+target + provision-md+agent-md)를 띄운 뒤, 제어 플레인에서 **Agent 를 거쳐
+mTLS 로** 다음을 검증합니다(LLM 키 불필요):
 
 - Bash 실행(마커 + Agent 컨테이너 hostname 반환),
+- **mgmt-dials-agent(역방향)**: `agent-md` 가 `:8791` 에서 수신하고, 제어 플레인이
+  `POST /api/exec-agents/dial` 로 접속해 등록 후 그 채널로 Bash 실행,
 - `__artex_dns` 실행 서비스,
 - 샌드박스 트래픽 캡처→조회: Agent 가 자신의 호스팅 레코더를 거쳐 `http://target/` 를
   fetch 한 뒤 제어 플레인이 `traffic_search` 로 캡처된 교환을 되받음,
@@ -162,6 +202,9 @@ provision+agent+target)를 띄운 뒤, 제어 플레인에서 **Agent 를 거쳐
 - Agent 호스팅 MCP: Agent 가 샌드박스에서 stdio MCP 서버(`e2e/mcpstub`)를 호스팅하고
   `mcp__e2estub__echo` 를 announce, 제어 플레인이 그 도구를 채널로 구동해 echo 를 되받음,
 - 작업 pin/unpin, 미지 도구 거부(negative).
+
+> 기본 agent 서비스는 **agent-dials-mgmt**(Agent→제어 플레인), `agent-md` 는
+> **mgmt-dials-agent**(제어 플레인→Agent) 방향을 각각 대표합니다.
 
 ```bash
 e2e/run.sh            # 빌드·기동·검증·정리

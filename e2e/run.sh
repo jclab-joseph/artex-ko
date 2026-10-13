@@ -29,8 +29,12 @@ dump_logs() {
   $COMPOSE logs --tail=40 management 2>&1 >&2 || true
   echo "----- agent logs (tail) -----" >&2
   $COMPOSE logs --tail=40 agent 2>&1 >&2 || true
+  echo "----- agent-md logs (tail) -----" >&2
+  $COMPOSE logs --tail=40 agent-md 2>&1 >&2 || true
   echo "----- provision logs -----" >&2
   $COMPOSE logs provision 2>&1 >&2 || true
+  echo "----- provision-md logs -----" >&2
+  $COMPOSE logs provision-md 2>&1 >&2 || true
 }
 
 cleanup() {
@@ -87,6 +91,38 @@ for i in $(seq 1 40); do
   [[ $i == 40 ]] && fail "agent never connected"
   sleep 2
 done
+
+# 5b. REVERSE direction (mgmt-dials-agent): the 'agent-md' container LISTENS on :8791
+#     and Management dials OUT to it via POST /api/exec-agents/dial. Proves the
+#     Management→Agent connection path + mTLS pin, then runs Bash through it.
+AGENT_MD_ID="e2e-agent-md"
+say "Dialing the listening agent '$AGENT_MD_ID' (mgmt-dials-agent) at agent-md:8791"
+for i in $(seq 1 30); do
+  DIALCODE="$(curl -s -o /dev/null -w '%{http_code}' "${AUTH[@]}" -X POST "$MGMT_URL/api/exec-agents/dial" \
+    -H 'Content-Type: application/json' -d "{\"agent_id\":\"$AGENT_MD_ID\",\"address\":\"agent-md:8791\"}")"
+  [[ "$DIALCODE" == "200" ]] && { ok "dialed agent-md (HTTP 200)"; break; }
+  [[ $i == 30 ]] && fail "could not dial agent-md (last HTTP $DIALCODE)"
+  sleep 2
+done
+# It must now appear in the registry alongside the agent-dials one.
+curl -fsS "${AUTH[@]}" "$MGMT_URL/api/exec-agents" | python3 -c "
+import sys, json
+ids = [a.get('id') for a in json.load(sys.stdin).get('agents', [])]
+assert '$AGENT_MD_ID' in ids, 'dialed agent not registered: %r' % ids
+print('assertion passed: mgmt-dials agent registered (%r)' % ids)
+" || fail "mgmt-dials agent not registered"
+# Drive Bash through the mgmt-dials agent (the reverse-direction channel works too).
+MDMARK="ARTEX_MD_OK_$RANDOM"
+MDRESP="$(curl -fsS "${AUTH[@]}" -X POST "$MGMT_URL/api/exec-agents/$AGENT_MD_ID/exec" \
+  -H 'Content-Type: application/json' \
+  -d "{\"tool\":\"Bash\",\"input\":{\"command\":\"echo $MDMARK; uname -n\"}}")"
+echo "$MDRESP" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+assert d.get('is_error') is not True, 'mgmt-dials exec errored: %r' % d
+assert '$MDMARK' in d.get('output',''), 'marker missing: %r' % d
+print('assertion passed: Bash ran via the mgmt-dials (Management→Agent) channel')
+" || fail "mgmt-dials Bash execution failed"
 
 # 6. Drive a Bash tool call from Management THROUGH the agent over mTLS.
 say "Executing Bash on the agent via the control plane"
