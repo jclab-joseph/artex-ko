@@ -101,7 +101,7 @@ func (m *Manager) loadOrInitPKI() error {
 		if err := writeSecret(m.caKeyPath(), ca.KeyPEM); err != nil {
 			return err
 		}
-		log.Printf("[agentctl] 신규 제어판 CA 생성: %s", m.caCertPath())
+		log.Printf("[agentctl] 신규 제어 플레인 CA 생성: %s", m.caCertPath())
 	}
 
 	mgmtCert, errMC := os.ReadFile(m.mgmtCertPath())

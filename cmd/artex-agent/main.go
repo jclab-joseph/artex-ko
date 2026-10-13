@@ -46,7 +46,7 @@ func run() int {
 	)
 	flag.Parse()
 
-	fmt.Printf("ARTEX agent %s  ·  execution plane (no LLM, no secrets)\n", version)
+	fmt.Printf("ARTEX agent %s  ·  execution plane\n", version)
 
 	if *bundlePath == "" {
 		log.Printf("[agent] 연결 번들이 필요합니다: --bundle <path> 또는 ARTEX_AGENT_BUNDLE")

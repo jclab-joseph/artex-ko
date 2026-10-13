@@ -458,7 +458,7 @@ func (s *Server) runHTTPTool(ctx context.Context, execRaw json.RawMessage, param
 		return actool.Errorf("http url 为空"), nil
 	}
 	// 执行面分离: Agent 가 붙어 있으면 HTTP 요청을 Agent 에서 보낸다. use_recording_proxy
-	// 는 Agent 가 자신의 로컬 기록 프록시로 해석한다(제어판 프록시 주소를 넘기지 않음).
+	// 는 Agent 가 자신의 로컬 기록 프록시로 해석한다(제어 플레인 프록시 주소를 넘기지 않음).
 	if be := remoteexec.BackendFrom(ctx); be.IsRemote() && be.Executes(execsvc.ToolHTTP) {
 		hdrs := map[string]string{}
 		for k, v := range spec.Headers {

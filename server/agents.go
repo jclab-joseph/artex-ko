@@ -49,7 +49,7 @@ func (s *Server) offloadMode() string {
 func (s *Server) initAgentControl(ctx context.Context, dataDir string) {
 	mgr, err := agentctl.NewManager(dataDir)
 	if err != nil {
-		log.Printf("[agentctl] 초기화 실패(실행면 분리 비활성): %v", err)
+		log.Printf("[agentctl] 초기화 실패(실행 플레인 분리 비활성): %v", err)
 		return
 	}
 	s.agents = mgr
@@ -61,7 +61,7 @@ func (s *Server) initAgentControl(ctx context.Context, dataDir string) {
 	}
 
 	mode := s.offloadMode()
-	log.Printf("[agentctl] 실행면 오프로드 모드=%s", mode)
+	log.Printf("[agentctl] 실행 플레인 오프로드 모드=%s", mode)
 	s.engine.SetExecBackendResolver(func(t *Task) remoteexec.Backend {
 		return s.resolveExecBackend(t, mode)
 	})

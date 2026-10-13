@@ -1049,7 +1049,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/intercept/judge", s.interceptGetJudgeConfig)
 	mux.HandleFunc("PUT /api/intercept/judge", s.interceptSetJudgeConfig)
 
-	// 실행면 분리: 샌드박스 Agent 제어(연결 번들 발급·연결 상태·진단 실행).
+	// 실행 플레인 분리: 샌드박스 Agent 제어(연결 번들 발급·연결 상태·진단 실행).
 	// 경로는 LLM 페르소나용 /api/agents 와 구분하기 위해 /api/exec-agents 를 쓴다.
 	mux.HandleFunc("GET /api/exec-agents", s.agentsList)
 	mux.HandleFunc("POST /api/exec-agents/bundle", s.agentsIssueBundle)
