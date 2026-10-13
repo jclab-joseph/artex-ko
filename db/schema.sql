@@ -840,6 +840,7 @@ CREATE TABLE IF NOT EXISTS mcp_servers (
     url         TEXT,
     enabled     BOOLEAN NOT NULL DEFAULT true,
     insecure    BOOLEAN NOT NULL DEFAULT false,  -- http: 跳过 TLS 证书校验(自签证书场景, issue #108)
+    agent_hosted BOOLEAN NOT NULL DEFAULT false, -- 执行面分离: 此 MCP 由沙箱 Agent 托管(控制面只注入占位+路由)
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -850,6 +851,7 @@ ALTER TABLE mcp_servers ADD CONSTRAINT mcp_servers_transport_check
     CHECK (transport IN ('stdio','http','sse'));
 -- 旧库补列(schema.sql 每次启动都会 Exec)。
 ALTER TABLE mcp_servers ADD COLUMN IF NOT EXISTS insecure BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE mcp_servers ADD COLUMN IF NOT EXISTS agent_hosted BOOLEAN NOT NULL DEFAULT false;
 DROP TRIGGER IF EXISTS trg_mcp_upd ON mcp_servers;
 CREATE TRIGGER trg_mcp_upd BEFORE UPDATE ON mcp_servers
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();

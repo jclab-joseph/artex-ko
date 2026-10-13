@@ -206,7 +206,7 @@ func (s *Server) agentsIssueBundle(w http.ResponseWriter, r *http.Request) {
 	if mode == "" {
 		mode = remoteexec.ModeAgentDials
 	}
-	bundle, err := s.agents.IssueBundle(mode, strings.TrimSpace(req.Address), strings.TrimSpace(req.AgentID))
+	bundle, err := s.agents.IssueBundle(mode, strings.TrimSpace(req.Address), strings.TrimSpace(req.AgentID), s.agentHostedMCPConfigs())
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return

@@ -11,6 +11,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"github.com/Autumn-27/artex/mcpconn"
 	"math/big"
 	"time"
 )
@@ -185,6 +186,11 @@ type Bundle struct {
 	Identity Identity  `json:"identity"` // the Agent's short-lived cert+key
 	Issued   time.Time `json:"issued_at"`
 	Expires  time.Time `json:"expires_at"`
+	// MCP lists the MCP servers this Agent should host (snapshot at issue time; change
+	// = reissue the bundle, consistent with the one-shot/reprovision model). Env may
+	// carry tool secrets (headers/tokens) the Agent needs to execute — NOT LLM secrets,
+	// which never leave the control plane. Empty for agents that host no MCP.
+	MCP []mcpconn.Config `json:"mcp,omitempty"`
 }
 
 // Marshal renders the bundle as indented JSON for the user to save into their sandbox.

@@ -76,7 +76,7 @@ func issueAgentCmd(args []string) int {
 		fmt.Fprintf(os.Stderr, "issue-agent: %v\n", err)
 		return 1
 	}
-	bundle, err := mgr.IssueBundle(remoteexec.ConnMode(*mode), *address, *id)
+	bundle, err := mgr.IssueBundle(remoteexec.ConnMode(*mode), *address, *id, nil)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "issue-agent: %v\n", err)
 		return 1

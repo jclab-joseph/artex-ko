@@ -21,7 +21,10 @@ import (
 	"syscall"
 	"time"
 
+	"io"
+
 	"github.com/Autumn-27/artex/execsvc"
+	"github.com/Autumn-27/artex/mcpconn"
 	"github.com/Autumn-27/artex/remoteexec"
 	"github.com/Autumn-27/artex/traffic"
 )
@@ -120,6 +123,32 @@ func run() int {
 	if tr != nil {
 		tools = append(tools, tr.Tools()...)
 		tools = append(tools, tr.EvidenceService())
+	}
+	// Agent-hosted MCP: connect the MCP servers the bundle assigns to this Agent and
+	// expose their tools (mcp__server__tool). stdio servers spawn child processes INSIDE
+	// the sandbox; http/sse connect to in-sandbox endpoints. The tools are announced
+	// with full schemas so the control plane can proxy them (it has no local definition).
+	// No LLM, no control-plane DB — only the tool-config the bundle carried.
+	var mcpClosers []io.Closer
+	defer func() {
+		for _, c := range mcpClosers {
+			_ = c.Close()
+		}
+	}()
+	for _, cfg := range bundle.MCP {
+		cl, err := mcpconn.Connect(context.Background(), cfg)
+		if err != nil {
+			log.Printf("[agent] MCP %q 연결 실패: %v", cfg.Name, err)
+			continue
+		}
+		mcpClosers = append(mcpClosers, cl)
+		ts, err := cl.Tools(context.Background())
+		if err != nil {
+			log.Printf("[agent] MCP %q tools/list 실패: %v", cfg.Name, err)
+			continue
+		}
+		tools = append(tools, ts...)
+		log.Printf("[agent] MCP %q 호스팅: %d개 도구", cfg.Name, len(ts))
 	}
 	exec := remoteexec.NewExecutor(tools, absWork, bashEnv)
 

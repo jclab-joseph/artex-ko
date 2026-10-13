@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Autumn-27/artex/mcpconn"
 	"github.com/Autumn-27/artex/remoteexec"
 	"github.com/google/uuid"
 )
@@ -122,7 +123,7 @@ func (m *Manager) loadOrInitPKI() error {
 // IssueBundle mints a connection bundle for a new (or named) Agent. mode selects who
 // dials; address is where the Agent listens (ModeMgmtDials) or dials (ModeAgentDials).
 // agentID may be empty to auto-generate one.
-func (m *Manager) IssueBundle(mode remoteexec.ConnMode, address, agentID string) (*remoteexec.Bundle, error) {
+func (m *Manager) IssueBundle(mode remoteexec.ConnMode, address, agentID string, mcp []mcpconn.Config) (*remoteexec.Bundle, error) {
 	if mode != remoteexec.ModeAgentDials && mode != remoteexec.ModeMgmtDials {
 		return nil, fmt.Errorf("agentctl: invalid mode %q", mode)
 	}
@@ -143,6 +144,7 @@ func (m *Manager) IssueBundle(mode remoteexec.ConnMode, address, agentID string)
 		Identity: identity,
 		Issued:   now,
 		Expires:  now.Add(remoteexec.AgentCertTTL),
+		MCP:      mcp,
 	}
 	m.mu.Lock()
 	m.issued[agentID] = now

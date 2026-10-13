@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/Autumn-27/artex/remoteexec"
+	"github.com/Autumn-27/norma/permission"
+	actool "github.com/Autumn-27/norma/tool"
 )
 
 // TestManagerAgentDialsRoundtrip exercises the full control-plane flow without a
@@ -29,7 +31,7 @@ func TestManagerAgentDialsRoundtrip(t *testing.T) {
 	addr := mgr.listener.Addr().String()
 
 	// Issue a bundle for an agent that dials Management at that address.
-	bundle, err := mgr.IssueBundle(remoteexec.ModeAgentDials, addr, "e2e-agent")
+	bundle, err := mgr.IssueBundle(remoteexec.ModeAgentDials, addr, "e2e-agent", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,6 +103,81 @@ func TestFailClosedWhenNoAgent(t *testing.T) {
 	}
 	if b.Executes("record_fact") {
 		t.Fatal("fail-closed backend must not block data/graph tools")
+	}
+}
+
+// TestAgentHostedMCPToolRouting proves the Agent-hosted MCP mechanism end to end at
+// the control-plane boundary: an Agent announces an MCP-shaped tool (mcp__server__tool)
+// WITH its schema, and Management — which has no local definition of it — builds a
+// placeholder from the announced metadata alone and routes a call through the backend
+// to the Agent. (mcpconn.Connect's stdio/http wiring is a thin delegate to the
+// upstream-tested clients; what is artex-specific is announce → placeholder → route.)
+func TestAgentHostedMCPToolRouting(t *testing.T) {
+	dir := t.TempDir()
+	mgr, err := NewManager(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := mgr.StartListener(ctx, "127.0.0.1:0"); err != nil {
+		t.Fatal(err)
+	}
+	bundle, err := mgr.IssueBundle(remoteexec.ModeAgentDials, mgr.listener.Addr().String(), "mcp-agent", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// An Agent whose tool set includes an MCP-shaped tool with a real schema.
+	echo := actool.Build(actool.Spec{
+		Name:        "mcp__demo__echo",
+		Description: "echo back text",
+		Schema: map[string]any{
+			"type":       "object",
+			"properties": map[string]any{"text": map[string]any{"type": "string"}},
+			"required":   []any{"text"},
+		},
+		ReadOnly: func(json.RawMessage) bool { return true },
+		Permissions: func(context.Context, json.RawMessage, permission.Context) permission.Decision {
+			return permission.Allowed()
+		},
+		Run: func(_ context.Context, in json.RawMessage, _ *actool.ToolContext) (actool.Result, error) {
+			var a struct {
+				Text string `json:"text"`
+			}
+			_ = json.Unmarshal(in, &a)
+			return actool.Text("echo:" + a.Text), nil
+		},
+	})
+	exec := remoteexec.NewExecutor(append(remoteexec.DefaultAgentTools("", "", false), echo), t.TempDir(), nil)
+	agentSess, err := remoteexec.ConnectAgentSide(ctx, bundle, exec)
+	if err != nil {
+		t.Fatalf("agent connect: %v", err)
+	}
+	defer agentSess.Close()
+	if !waitFor(2*time.Second, func() bool { return mgr.HasLive() }) {
+		t.Fatal("agent never registered")
+	}
+
+	// Management has the MCP tool's metadata (schema) purely from the announce.
+	meta, ok := mgr.AnnouncedMetas()["mcp__demo__echo"]
+	if !ok || len(meta.Schema) == 0 || !strings.Contains(string(meta.Schema), "text") {
+		t.Fatalf("announced MCP meta missing/schemaless: %+v", meta)
+	}
+
+	// Build a placeholder from the announced meta alone and route it via the backend.
+	be := mgr.AnyBackend()
+	if be == nil || !be.Executes("mcp__demo__echo") {
+		t.Fatalf("backend should route the announced MCP tool: %+v", be)
+	}
+	proxy := be.Wrap(remoteexec.CoreToolFromMeta(meta))
+	in, _ := json.Marshal(map[string]string{"text": "hi"})
+	res, err := proxy.Call(ctx, in, &actool.ToolContext{WorkingDir: "mcp"})
+	if err != nil {
+		t.Fatalf("proxy call: %v", err)
+	}
+	if res.IsError || res.Flatten() != "echo:hi" {
+		t.Fatalf("unexpected MCP proxy result: isErr=%v out=%q", res.IsError, res.Flatten())
 	}
 }
 

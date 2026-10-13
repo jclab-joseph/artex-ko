@@ -5,10 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/Autumn-27/artex/db"
+	"github.com/Autumn-27/artex/mcpconn"
 	"github.com/Autumn-27/artex/mcphttp"
+	"github.com/Autumn-27/artex/remoteexec"
 	"github.com/Autumn-27/norma/mcp"
 	actool "github.com/Autumn-27/norma/tool"
 )
@@ -35,6 +38,58 @@ const (
 	errMCPSSENoURL            = "sse 전송 방식에 URL 이 없습니다"
 	errMCPUnknownTransportFmt = "알 수 없는 전송 방식입니다: %q"
 )
+
+// mcpConfigFromDB projects a stored MCP row into the db-free mcpconn.Config shared
+// with the Agent (bundle). Env doubles as HTTP headers for http/sse transports.
+func mcpConfigFromDB(m *db.MCPServer) mcpconn.Config {
+	return mcpconn.Config{
+		Name:      m.Name,
+		Transport: m.Transport,
+		Command:   m.Command,
+		Args:      jsonStrSlice(m.Args),
+		Env:       jsonStrMap(m.Env),
+		URL:       m.URL,
+		Insecure:  m.Insecure,
+	}
+}
+
+// agentHostedMCPConfigs returns the enabled MCP servers flagged agent_hosted, in the
+// db-free form carried by the connection bundle so the sandbox Agent hosts them.
+func (s *Server) agentHostedMCPConfigs() []mcpconn.Config {
+	all, err := s.m.pg.ListMCP()
+	if err != nil {
+		log.Printf("[mcp] agent-hosted 목록 조회 실패: %v", err)
+		return nil
+	}
+	var out []mcpconn.Config
+	for _, m := range all {
+		if m.Enabled && m.AgentHosted {
+			out = append(out, mcpConfigFromDB(m))
+		}
+	}
+	return out
+}
+
+// mcpHostedTools decides, for one MCP server, whether it is hosted by the sandbox
+// Agent (split mode) and if so returns the Management-side placeholder tools built
+// from the Agent's announced metadata. The second return reports "handled": when true
+// the caller must NOT connect the server locally (it runs in the sandbox), even if the
+// placeholder set is currently empty (no Agent connected yet). When false, the server
+// is a normal control-plane MCP and the caller connects it as before.
+func (s *Server) mcpHostedTools(m *db.MCPServer) ([]actool.CoreTool, bool) {
+	if m == nil || !m.AgentHosted || s.offloadMode() == "off" || s.agents == nil {
+		return nil, false
+	}
+	metas := s.agents.AnnouncedMetas()
+	prefix := "mcp__" + m.Name + "__"
+	var out []actool.CoreTool
+	for name, meta := range metas {
+		if strings.HasPrefix(name, prefix) {
+			out = append(out, remoteexec.CoreToolFromMeta(meta))
+		}
+	}
+	return out, true
+}
 
 // connectMCP dials one MCP server per its transport. Callers must Close the client.
 func connectMCP(ctx context.Context, m *db.MCPServer) (mcpClient, error) {
