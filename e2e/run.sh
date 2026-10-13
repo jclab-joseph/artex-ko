@@ -155,6 +155,32 @@ sys.exit(0 if (d.get('is_error') is not True and 'target' in d.get('output','') 
   sleep 1
 done
 
+# 7b-evidence. Prove finding-bind evidence SYNC: the control plane pulls the cited
+#   exchange bytes out of the sandbox via the Agent's __artex_traffic_evidence service
+#   (the exact call evidence.Store makes when a finding is bound in split mode). Assert
+#   a well-formed exchange with non-empty, decodable base64 bodies comes back.
+say "Syncing captured evidence out of the sandbox (__artex_traffic_evidence)"
+EXID="$(echo "$TS" | python3 -c "import sys,json; d=json.load(sys.stdin); print(json.loads(d['output'])[0]['id'])")"
+[[ -n "$EXID" ]] || fail "could not extract exchange id from traffic_search"
+EV="$(curl -fsS "${AUTH[@]}" -X POST "$MGMT_URL/api/exec-agents/$AGENT_ID/exec" \
+  -H 'Content-Type: application/json' \
+  -d "{\"tool\":\"__artex_traffic_evidence\",\"input\":{\"ids\":[\"$EXID\"]}}")"
+echo "$EV" | python3 -m json.tool
+echo "$EV" | python3 -c "
+import sys, json, base64
+d = json.load(sys.stdin)
+assert d.get('is_error') is not True, 'evidence service errored: %r' % d
+payload = json.loads(d.get('output','') or '{}')
+exs = payload.get('exchanges') or []
+assert len(exs) == 1, 'expected 1 exchange, got %r' % payload
+e = exs[0]
+assert e.get('id') == '$EXID', 'id mismatch: %r' % e
+assert not e.get('req_oversize') and not e.get('resp_oversize'), 'small bodies flagged oversize: %r' % e
+resp = base64.b64decode(e.get('resp_b64',''))  # must decode
+assert e.get('resp_head'), 'missing response head: %r' % e
+print('assertion passed: evidence synced from sandbox (resp %d bytes, head present)' % len(resp))
+" || fail "evidence sync assertion failed"
+
 # 7c. Per-task Agent pinning API (multi-agent routing).
 say "Pinning a task to the agent, then unpinning"
 PINCODE="$(curl -s -o /dev/null -w '%{http_code}' "${AUTH[@]}" -X POST "$MGMT_URL/api/exec-agents/$AGENT_ID/pin" \

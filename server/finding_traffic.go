@@ -33,7 +33,23 @@ const (
 )
 
 func (s *Server) evidenceStore() *evidence.Store {
-	return evidence.New(s.m.pg, s.m.traffic, filepath.Join(s.m.dir, "evidence"))
+	return evidence.New(s.m.pg, s.evidenceSource(), filepath.Join(s.m.dir, "evidence"))
+}
+
+// evidenceSource picks where captured bodies are read from when a finding is bound:
+//   - a local in-process recorder when one runs (monolith / non-split);
+//   - otherwise, in split mode, the sandbox Agent that hosts the recorder, over the
+//     channel (remoteEvidenceSource);
+//   - else nil, so a bind without any recorder fails with a clear "store unavailable"
+//     rather than panicking. Read paths don't use this — they serve the snapshot.
+func (s *Server) evidenceSource() evidence.TrafficEvidence {
+	if s.m.traffic != nil {
+		return s.m.traffic
+	}
+	if s.offloadMode() != "off" && s.agents != nil {
+		return &remoteEvidenceSource{agents: s.agents}
+	}
+	return nil
 }
 
 // Add only new optional properties; preserve edited descriptions, existing

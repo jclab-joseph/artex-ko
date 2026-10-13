@@ -62,11 +62,11 @@ func seedExchange(t *testing.T, s *Store, id string, body []byte, spill bool) {
 		}
 		inline = []byte("TRUNCATED PREVIEW")
 	}
-	_, err := s.Traffic.DB().Exec(`INSERT INTO exchanges(id,ts,host,method,url_template,url,status,content_type,req_len,resp_len,path) VALUES(?,?,'fixture.local','POST','/test',?,200,'application/octet-stream',2,?,'')`, id, time.Now().Unix(), "https://fixture.local/"+id, len(body))
+	_, err := s.Traffic.(*traffic.Traffic).DB().Exec(`INSERT INTO exchanges(id,ts,host,method,url_template,url,status,content_type,req_len,resp_len,path) VALUES(?,?,'fixture.local','POST','/test',?,200,'application/octet-stream',2,?,'')`, id, time.Now().Unix(), "https://fixture.local/"+id, len(body))
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = s.Traffic.DB().Exec(`INSERT INTO exchange_bodies(id,req_head,req_body,resp_head,resp_body,resp_blob) VALUES(?,?,?, ?,?,?)`, id, "POST /test HTTP/1.1\nHost: fixture.local\n", []byte("{}"), "HTTP 200\nContent-Type: application/octet-stream\n", inline, blob)
+	_, err = s.Traffic.(*traffic.Traffic).DB().Exec(`INSERT INTO exchange_bodies(id,req_head,req_body,resp_head,resp_body,resp_blob) VALUES(?,?,?, ?,?,?)`, id, "POST /test HTTP/1.1\nHost: fixture.local\n", []byte("{}"), "HTTP 200\nContent-Type: application/octet-stream\n", inline, blob)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +101,7 @@ func TestEvidenceBindingLifecycle(t *testing.T) {
 	if other.Traffic.Bindings[0].SnapshotID != r.Traffic.Bindings[2].SnapshotID {
 		t.Fatal("snapshot was not shared")
 	}
-	if _, err = s.Traffic.DeleteHost("fixture.local"); err != nil {
+	if _, err = s.Traffic.(*traffic.Traffic).DeleteHost("fixture.local"); err != nil {
 		t.Fatal(err)
 	}
 	for _, binding := range r.Traffic.Bindings {
@@ -185,7 +185,7 @@ func TestEvidenceAtomicFailuresAndLegacy(t *testing.T) {
 			switch kind {
 			case "missing_body":
 				seedExchange(t, s, "broken", []byte("more than preview"), false)
-				s.Traffic.DB().Exec(`UPDATE exchange_bodies SET resp_body=? WHERE id='broken'`, []byte("x"))
+				s.Traffic.(*traffic.Traffic).DB().Exec(`UPDATE exchange_bodies SET resp_body=? WHERE id='broken'`, []byte("x"))
 				refs = []db.TrafficRef{{TrafficID: "valid"}, {TrafficID: "broken"}}
 			case "disk_failure":
 				local.Dir = filepath.Join(dir, "file-not-dir")
@@ -209,7 +209,7 @@ func TestEvidenceAtomicFailuresAndLegacy(t *testing.T) {
 	os.MkdirAll(legacy, 0o700)
 	os.WriteFile(filepath.Join(legacy, "request.http"), []byte("GET / HTTP/1.1\nHost: old.local\n"), 0o600)
 	os.WriteFile(filepath.Join(legacy, "response.http"), []byte("HTTP 200\n\nlegacy body"), 0o600)
-	_, err := s.Traffic.DB().Exec(`INSERT INTO exchanges(id,ts,host,method,url_template,url,status,content_type,req_len,resp_len,path) VALUES('old',1,'old.local','GET','/','http://old.local/',200,'text/plain',0,11,'legacy')`)
+	_, err := s.Traffic.(*traffic.Traffic).DB().Exec(`INSERT INTO exchanges(id,ts,host,method,url_template,url,status,content_type,req_len,resp_len,path) VALUES('old',1,'old.local','GET','/','http://old.local/',200,'text/plain',0,11,'legacy')`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,7 +257,7 @@ func TestEvidenceConcurrentBindAndDelete(t *testing.T) {
 	// or nothing does. An already-bound snapshot remains readable in both cases.
 	wg.Add(2)
 	go func() { defer wg.Done(); s.Bind(ctx, r.FindingID, []db.TrafficRef{{TrafficID: "race"}}) }()
-	go func() { defer wg.Done(); s.Traffic.DeleteHost("fixture.local") }()
+	go func() { defer wg.Done(); s.Traffic.(*traffic.Traffic).DeleteHost("fixture.local") }()
 	wg.Wait()
 	if err = s.WithBinding(ctx, r.FindingID, list.Bindings[0].ID, func(b db.FindingTrafficBinding) error {
 		f, _, err := s.OpenBody(b.Snapshot, "response")

@@ -114,9 +114,12 @@ func run() int {
 	// by the control plane over the same channel (not shown to the model).
 	tools = append(tools, execsvc.Tools(*egressProxy, *egressCA)...)
 	// When hosting the recorder, expose its query tools so Management can inspect the
-	// captured evidence over the channel (traffic_search/traffic_get/traffic_blob).
+	// captured evidence over the channel (traffic_search/traffic_get/traffic_blob),
+	// plus the internal evidence-sync service the control plane calls at finding-bind
+	// time to pull cited bytes out of the sandbox (not shown to the model).
 	if tr != nil {
 		tools = append(tools, tr.Tools()...)
+		tools = append(tools, tr.EvidenceService())
 	}
 	exec := remoteexec.NewExecutor(tools, absWork, bashEnv)
 

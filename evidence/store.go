@@ -20,13 +20,22 @@ import (
 	"github.com/Autumn-27/artex/traffic"
 )
 
+// TrafficEvidence is the source of captured exchange bodies the store snapshots at
+// bind time. In the monolith it is the in-process *traffic.Traffic; in split mode it
+// is an adapter that pulls the bytes from the sandbox Agent over the channel. Only
+// bind/record consult it — every read path serves the already-persisted snapshot, so
+// a nil source only fails new bindings, never report rendering.
+type TrafficEvidence interface {
+	ReadEvidence(ctx context.Context, ids []string, consume func(traffic.EvidenceExchange) error) error
+}
+
 type Store struct {
 	DB      *db.DB
-	Traffic *traffic.Traffic
+	Traffic TrafficEvidence
 	Dir     string
 }
 
-func New(pg *db.DB, tr *traffic.Traffic, dir string) *Store {
+func New(pg *db.DB, tr TrafficEvidence, dir string) *Store {
 	return &Store{DB: pg, Traffic: tr, Dir: dir}
 }
 
@@ -157,6 +166,9 @@ func (s *Store) prepare(ctx context.Context, refs []db.TrafficRef) ([]db.Prepare
 	for i, ref := range refs {
 		ids[i] = ref.TrafficID
 		byID[ref.TrafficID] = ref
+	}
+	if s.Traffic == nil {
+		return nil, errors.New("流量录制存储不可用")
 	}
 	err = s.Traffic.ReadEvidence(ctx, ids, func(e traffic.EvidenceExchange) error {
 		rh, err := s.writeBody(e.Request, e.ReqLen, e.ReqHash)
