@@ -56,8 +56,17 @@ func (b *RemoteBackend) IsRemote() bool { return true }
 func (b *RemoteBackend) Executes(name string) bool { return b.agentTools[name] }
 
 func (b *RemoteBackend) Wrap(meta actool.CoreTool) actool.CoreTool {
-	if b.agentTools[meta.Name()] {
+	name := meta.Name()
+	if b.agentTools[name] {
 		return NewRemoteTool(meta, b.sess)
+	}
+	// Fail closed: an execution-plane tool the connected Agent did NOT announce must not
+	// silently run on the control plane. "Not announced" means the Agent cannot host it
+	// (capability missing), so block it rather than falling back to local execution —
+	// the isolation boundary must not depend on a complete announce list. Non-execution
+	// tools (data/graph writes) stay in-process as before.
+	if IsExecTool(name) {
+		return &blockedTool{meta: meta, reason: "연결된 샌드박스 Agent 가 이 실행 도구를 제공하지 않습니다(" + name + "); 격리 정책상 제어 플레인에서 실행할 수 없습니다"}
 	}
 	return meta
 }
@@ -90,7 +99,7 @@ type FailClosedBackend struct {
 // NewFailClosedBackend builds a fail-closed backend. reason is surfaced to the model.
 func NewFailClosedBackend(reason string) *FailClosedBackend {
 	set := map[string]bool{}
-	for _, n := range DefaultExecToolNames() {
+	for _, n := range ExecToolNames() {
 		set[n] = true
 	}
 	if reason == "" {

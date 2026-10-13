@@ -76,20 +76,29 @@ func AugmentTools(ctx context.Context, agentKey string, base []actool.CoreTool) 
 	return out, def, cleanup
 }
 
-// RemoteWebFetchActive reports whether the execution backend bound to ctx runs WebFetch
-// in a sandboxed Agent. Roles use it to disable norma's in-process WebFetch (which would
-// otherwise egress from the control plane) and inject a remote proxy instead.
-func RemoteWebFetchActive(ctx context.Context) bool {
-	be := remoteexec.BackendFrom(ctx)
-	return be.IsRemote() && be.Executes("WebFetch")
+// RemoteExecActive reports whether a sandbox-Agent execution backend is bound to ctx
+// (i.e. the run is in split mode). When true, EVERY execution-plane tool must run in the
+// Agent or be blocked — none may run on the control plane — so roles disable norma's
+// in-process WebFetch + background manager and inject remote proxies. The decision keys
+// off IsRemote alone, not off whether the Agent announced a specific tool: a missing
+// capability must fail closed (block), never fall back to local execution.
+func RemoteExecActive(ctx context.Context) bool {
+	return remoteexec.BackendFrom(ctx).IsRemote()
 }
 
-// InjectRemoteWebFetch appends a plain WebFetch tool to base when the bound backend runs
-// WebFetch remotely, so AugmentTools wraps it into a remote proxy. The config is empty on
-// purpose: the Agent builds the real WebFetch with its own local recording proxy; here we
-// only need the tool's name/description/schema. No-op when execution is in-process.
+// RemoteWebFetchActive reports whether WebFetch must be routed to the sandbox Agent
+// (true whenever execution is remote — WebFetch is an execution-plane tool and may never
+// egress from the control plane in split mode). Roles use it to disable norma's
+// in-process WebFetch and switch to the remote proxy.
+func RemoteWebFetchActive(ctx context.Context) bool { return RemoteExecActive(ctx) }
+
+// InjectRemoteWebFetch appends a plain WebFetch tool to base when execution is remote, so
+// AugmentTools wraps it: a remote proxy when the Agent announced WebFetch, or a blocked
+// tool when it did not (fail closed — never a control-plane fetch). The config is empty
+// on purpose: the Agent builds the real WebFetch with its own local recording proxy; here
+// we only need the tool's name/description/schema. No-op when execution is in-process.
 func InjectRemoteWebFetch(ctx context.Context, base []actool.CoreTool) []actool.CoreTool {
-	if RemoteWebFetchActive(ctx) {
+	if RemoteExecActive(ctx) {
 		return append(base, actool.NewWebFetch(actool.WebFetchConfig{}))
 	}
 	return base
