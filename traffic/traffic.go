@@ -30,7 +30,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/norma/permission"
 	actool "github.com/Autumn-27/norma/tool"
 	mproxy "github.com/lqqyt2423/go-mitmproxy/proxy"
@@ -440,7 +439,7 @@ func (t *Traffic) record(f *mproxy.Flow) {
 	defer t.wmu.Unlock()
 	host := f.Request.URL.Hostname()
 	method := f.Request.Method
-	tmpl := db.TemplatePath(f.Request.URL.EscapedPath())
+	tmpl := templatePath(f.Request.URL.EscapedPath())
 	n := t.seq.Add(1)
 	now := time.Now()
 	id := fmt.Sprintf("%d-%04d", now.Unix(), n%10000)
