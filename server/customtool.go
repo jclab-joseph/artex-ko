@@ -175,6 +175,10 @@ func (s *Server) pgTestCustomTool(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
 	defer cancel()
+	// Test runs obey the same isolation policy as real calls: in split mode command/
+	// script/http route to the sandbox Agent (or fail closed when none is selected/
+	// connected), never on the control plane (보안 리뷰 F4). Taskless → nil task.
+	ctx = s.bindExecCtx(ctx, nil)
 	tc := &actool.ToolContext{WorkingDir: s.m.dir} // run in the project dir, like a real call
 	var res actool.Result
 	switch req.Kind {
@@ -374,10 +378,12 @@ func (s *Server) runScriptTool(ctx context.Context, key string, execRaw json.Raw
 	if strings.TrimSpace(spec.Code) == "" {
 		return actool.Errorf("script code 为空"), nil
 	}
-	// 执行面分离:샌드박스 Agent 가 붙어 있으면 스크립트 실행을 Agent 로 넘긴다(인터프리터
-	// 선호값만 전달; 실제 실행·인터프리터 탐색은 Agent 가 수행). 미연결/단일 프로세스면 아래
-	// 로컬 경로 그대로.
-	if be := remoteexec.BackendFrom(ctx); be.IsRemote() && be.Executes(execsvc.ToolScript) {
+	// 执行面分离: split 모드(IsRemote)면 스크립트 실행을 execsvc 로 넘긴다. Agent 가 이
+	// 서비스를 announce 했으면 원격 실행(인터프리터 선호값만 전달; 실제 실행·탐색은 Agent),
+	// announce 안 했거나 미연결(fail-closed)이면 Wrap 이 차단한다 — 제어 플레인 로컬 실행
+	// 로 절대 폴백하지 않는다(보안 리뷰 F3). off/단일 프로세스(IsRemote=false)일 때만 아래
+	// 로컬 경로.
+	if be := remoteexec.BackendFrom(ctx); be.IsRemote() {
 		in, _ := json.Marshal(execsvc.ScriptInput{
 			Interp: s.pythonInterpreter(), Code: spec.Code, Params: params, Key: key, TimeoutMs: spec.TimeoutMs,
 		})
@@ -457,9 +463,10 @@ func (s *Server) runHTTPTool(ctx context.Context, execRaw json.RawMessage, param
 	if strings.TrimSpace(rawURL) == "" {
 		return actool.Errorf("http url 为空"), nil
 	}
-	// 执行面分离: Agent 가 붙어 있으면 HTTP 요청을 Agent 에서 보낸다. use_recording_proxy
+	// 执行面分离: split 모드(IsRemote)면 HTTP 요청을 execsvc 로 넘긴다 — announce 됐으면
+	// Agent 에서 전송, 아니면 Wrap 이 차단(로컬 폴백 없음, 보안 리뷰 F3). use_recording_proxy
 	// 는 Agent 가 자신의 로컬 기록 프록시로 해석한다(제어 플레인 프록시 주소를 넘기지 않음).
-	if be := remoteexec.BackendFrom(ctx); be.IsRemote() && be.Executes(execsvc.ToolHTTP) {
+	if be := remoteexec.BackendFrom(ctx); be.IsRemote() {
 		hdrs := map[string]string{}
 		for k, v := range spec.Headers {
 			hdrs[k] = renderTemplate(v, params, identity)

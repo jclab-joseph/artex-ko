@@ -200,6 +200,23 @@ func (s *Server) resolveExecBackend(t *Task, mode string) remoteexec.Backend {
 	return remoteexec.LocalBackend{}
 }
 
+// bindExecCtx attaches the execution-backend policy to a ctx that is NOT a planner/worker
+// run — a conversation, a task chat turn, or a custom-tool test run — so its tool calls
+// obey the same sandbox-offload rules (route to Agent, or fail closed). Pass the owning
+// task for a task-scoped run, or nil for a taskless one (pinned/require with no selectable
+// Agent → fail closed, since there is no Agent selection to honor). No-op when the agent
+// control plane is disabled or offload is "off", so monolith behavior is unchanged.
+func (s *Server) bindExecCtx(ctx context.Context, t *Task) context.Context {
+	if s.agents == nil {
+		return ctx
+	}
+	mode := s.offloadMode()
+	if mode == "off" {
+		return ctx
+	}
+	return remoteexec.WithBackend(ctx, s.resolveExecBackend(t, mode))
+}
+
 // execReadyFor reports whether a task may start/continue planning. Only "pinned" mode
 // gates this: the task runs only when its explicitly selected Agent is connected. Other
 // modes always return true (their start behavior is unchanged). Keeping the gate here —
