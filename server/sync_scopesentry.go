@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -34,6 +35,12 @@ const (
 const (
 	errSSDataSourceMissingFmt = "데이터 소스 %s 가 없습니다. 먼저 생성해 주세요"
 	errSSDataSourceNoURLFmt   = "데이터 소스 %s 에 URL 이 설정되지 않았습니다. 먼저 설정해 주세요"
+	// ScopeSentry sync makes a direct outbound HTTP/MCP connection from the control
+	// plane. In split mode — the ScopeSentry MCP flagged agent_hosted, or a strict
+	// offload posture (require/pinned) — that connection is forbidden: Management makes
+	// no outbound target/data-source connections (보안 리뷰: ScopeSentry 가 agent_hosted
+	// 를 무시하고 Management 에서 직접 연결).
+	errSSSplitMode            = "ScopeSentry 동기화는 분리/엄격 모드(agent_hosted 또는 require/pinned)에서 비활성화됩니다: 제어 플레인에서 외부 HTTP 연결을 만들지 않습니다"
 	errSSListProjectsPrefix   = "list_projects_data 호출에 실패했습니다: "
 	errSSParseProjectsPrefix  = "프로젝트 목록을 해석하지 못했습니다: "
 	errSSListTasksPrefix      = "list_tasks 호출에 실패했습니다: "
@@ -76,6 +83,10 @@ func (s *Server) scopeSentryClient(ctx context.Context) (*mcphttp.Client, error)
 	}
 	if m.URL == "" {
 		return nil, fmt.Errorf(trMsg(errSSDataSourceNoURLFmt), scopeSentryMCPName)
+	}
+	// Split mode: the control plane must not open this connection itself (보안 리뷰).
+	if s.dispositionOfMCP(m) != mcpConnectLocal {
+		return nil, errors.New(trMsg(errSSSplitMode))
 	}
 	return mcphttp.New(ctx, m.Name, m.URL, jsonStrMap(m.Env), m.Insecure)
 }
@@ -120,8 +131,9 @@ func (s *Server) syncSSStatus(w http.ResponseWriter, r *http.Request) {
 	if m.Tools != nil {
 		resp["tools"] = m.Tools
 	}
-	// Light reachability probe only when it can actually connect.
-	if configured && m.Enabled {
+	// Light reachability probe only when it can actually connect locally — never open a
+	// control-plane connection in split mode (agent_hosted / strict offload) (보안 리뷰).
+	if configured && m.Enabled && s.dispositionOfMCP(m) == mcpConnectLocal {
 		ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
 		defer cancel()
 		if cl, cerr := mcphttp.New(ctx, m.Name, m.URL, jsonStrMap(m.Env), m.Insecure); cerr == nil {

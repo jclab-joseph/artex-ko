@@ -7,6 +7,7 @@ import (
 	"log"
 	"runtime/debug"
 
+	"github.com/Autumn-27/artex/remoteexec"
 	actool "github.com/Autumn-27/norma/tool"
 )
 
@@ -61,15 +62,96 @@ func AugmentTools(ctx context.Context, agentKey string, base []actool.CoreTool) 
 		out = ToolResolve(ctx, agentKey, out)
 	}
 	out, def.FindingGuidance = findingWorkflowTools(agentKey, out)
-	// Register lowercase/snake_case aliases for the CamelCase built-ins (Bash →
-	// bash, WebFetch → web_fetch) and defer them, so a model that drifts to the
-	// model-conventional spelling still hits the handler while the model keeps
-	// seeing only the official names. See issue #19.
-	out, def.Deferred = addToolAliases(out, def.Deferred)
+	// Execution-plane split: when a sandboxed Agent is bound to this run (via the
+	// context), replace each execution tool's Call with a proxy that ships the call
+	// over mTLS to the Agent. Data/graph tools (insert_assets, record_fact, …) and
+	// anything the Agent did not announce stay in-process. Unbound runs get the
+	// LocalBackend, which is a no-op — identical to the pre-split monolith. The guard
+	// panic-wrapper is applied last, so it still covers remote tools (a transport
+	// error returns as a tool error, never a panic).
+	backend := remoteexec.BackendFrom(ctx)
 	for i, t := range out {
-		out[i] = guardPanic(t)
+		out[i] = guardPanic(backend.Wrap(t))
 	}
+	// Register lowercase/snake_case aliases for the CamelCase built-ins (Bash → bash,
+	// WebFetch → web_fetch) and defer them, so a model that drifts to the model-
+	// conventional spelling still hits the handler while the model keeps seeing only
+	// the official names (see issue #19). Added AFTER backend wrapping so each alias
+	// delegates to the already-wrapped tool: in split mode a drifted spelling (bash)
+	// routes to the sandbox Agent — or is fail-closed-blocked — exactly like the
+	// official name, never around the isolation boundary.
+	out, def.Deferred = addToolAliases(out, def.Deferred)
 	return out, def, cleanup
+}
+
+// RemoteExecActive reports whether a sandbox-Agent execution backend is bound to ctx
+// (i.e. the run is in split mode). When true, EVERY execution-plane tool must run in the
+// Agent or be blocked — none may run on the control plane — so roles disable norma's
+// in-process WebFetch + background manager and inject remote proxies. The decision keys
+// off IsRemote alone, not off whether the Agent announced a specific tool: a missing
+// capability must fail closed (block), never fall back to local execution.
+func RemoteExecActive(ctx context.Context) bool {
+	return remoteexec.BackendFrom(ctx).IsRemote()
+}
+
+// beginExecSession opens a fresh execution session for one agentcore session when the
+// run is in split mode, binding a unique id to ctx (so every remote tool call this
+// session issues is keyed by it on the Agent) and returning a cleanup func. The cleanup
+// tells the Agent to tear down that session's background/shell state — on its OWN base
+// context, so it still runs when the run ctx was cancelled. Callers defer it alongside
+// Session.Close so the remote teardown follows the local session's end. No-op (and no
+// id, no RPC) when execution is in-process (보안 리뷰 F2/F3).
+//
+// A fresh id per agentcore session — not the reused transcript SessionID — is what
+// keeps a previous run's late teardown from killing the next run's processes.
+func beginExecSession(ctx context.Context) (context.Context, func()) {
+	b := remoteexec.BackendFrom(ctx)
+	if !b.IsRemote() {
+		return ctx, func() {}
+	}
+	id := remoteexec.NewExecSessionID()
+	return remoteexec.WithExecSession(ctx, id), func() {
+		remoteexec.EndExecSession(context.Background(), b, id)
+	}
+}
+
+// RemoteWebFetchActive reports whether WebFetch must be routed to the sandbox Agent
+// (true whenever execution is remote — WebFetch is an execution-plane tool and may never
+// egress from the control plane in split mode). Roles use it to disable norma's
+// in-process WebFetch and switch to the remote proxy.
+func RemoteWebFetchActive(ctx context.Context) bool { return RemoteExecActive(ctx) }
+
+// InjectRemoteWebFetch appends a plain WebFetch tool to base when execution is remote, so
+// AugmentTools wraps it: a remote proxy when the Agent announced WebFetch, or a blocked
+// tool when it did not (fail closed — never a control-plane fetch). The config is empty
+// on purpose: the Agent builds the real WebFetch with its own local recording proxy; here
+// we only need the tool's name/description/schema. No-op when execution is in-process.
+func InjectRemoteWebFetch(ctx context.Context, base []actool.CoreTool) []actool.CoreTool {
+	if RemoteExecActive(ctx) {
+		return append(base, actool.NewWebFetch(actool.WebFetchConfig{}))
+	}
+	return base
+}
+
+// InjectRemoteBackgroundTools appends norma's background-task tools (Monitor/TaskOutput/
+// TaskStop/TaskList) to base when execution is remote, so AugmentTools wraps them into
+// remote proxies (or blocked tools when the Agent does not host them). In split mode the
+// background Manager lives only in the sandbox Agent, so each role also sets
+// opts.DisableBackgroundTasks=RemoteExecActive(ctx) to suppress the SDK's LOCAL injection
+// of these same tools (which would spawn processes on the control plane — 보안 리뷰 F1).
+// No-op when execution is in-process: the SDK injects the local ones as before.
+func InjectRemoteBackgroundTools(ctx context.Context, base []actool.CoreTool) []actool.CoreTool {
+	if RemoteExecActive(ctx) {
+		return append(base, actool.NewMonitor(), actool.NewTaskOutput(), actool.NewTaskStop(), actool.NewTaskList())
+	}
+	return base
+}
+
+// ExecBashEnv returns the Bash-subprocess egress env for a role. When Bash runs in a
+// sandboxed Agent the control plane sends none (the Agent injects its own, pointed at its
+// local recording proxy); otherwise it is the ordinary in-process proxyEnv.
+func ExecBashEnv(ctx context.Context, proxyAddr, caCert string) []string {
+	return remoteBashEnv(remoteexec.BackendFrom(ctx), proxyAddr, caCert)
 }
 
 // guardPanic turns a panicking tool handler into an ordinary tool error. The

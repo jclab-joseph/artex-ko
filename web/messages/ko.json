@@ -180,7 +180,8 @@
       "tasks": "작업",
       "tools": "도구",
       "traffic": "트래픽",
-      "workspace": "작업 공간"
+      "workspace": "작업 공간",
+      "exec-agents": "실행 Agent"
     }
   },
   "notFound": {
@@ -1931,6 +1932,9 @@
     "argsLabel": "인자 (공백으로 구분)",
     "urlLabel": "원격 URL",
     "insecureLabel": "TLS 인증서 검증 건너뛰기 (자체 서명 인증서)",
+    "agentHostedLabel": "샌드박스 Agent 에서 호스팅 (실행 플레인 분리)",
+    "agentHostedHint": "켜면 이 MCP 서버를 제어 플레인이 아니라 샌드박스 Agent 가 호스팅합니다. 설정은 연결 번들 발급 시 스냅샷되므로 변경 후 번들을 재발급하세요. 인터넷과 분리된 샌드박스에서는 외부 http/sse 서버로 나갈 수 없으니 stdio(샌드박스 내 프로세스)나 샌드박스 네트워크 안의 엔드포인트를 쓰세요. GitHub 같은 외부 SaaS MCP 는 끄고 제어 플레인에 두세요.",
+    "agentHostedBadge": "Agent 호스팅",
     "headersLabel": "요청 헤더 (한 줄에 KEY=VALUE, 예: Authorization=Bearer xxx)",
     "envLabel": "환경 변수 (한 줄에 KEY=VALUE)",
     "refresh": "새로 고침",
@@ -2737,7 +2741,12 @@
       "validateRequired": "설명과 목표를 입력하세요",
       "validateSourceLimit": "소스 작업은 최대 {max}개까지 연결할 수 있습니다",
       "createdToast": "작업을 만들었습니다",
-      "createFailed": "생성 실패: {msg}"
+      "createFailed": "생성 실패: {msg}",
+      "agentLabel": "실행 Agent (샌드박스)",
+      "agentPlaceholder": "Agent 선택",
+      "agentNone": "선택 안 함",
+      "agentHint": "이 작업의 실행계 도구를 실행할 샌드박스 Agent (선택).",
+      "agentHintPinned": "pinned 모드: 선택해야 작업이 실행됩니다. 미선택 시 Agent 를 선택할 때까지 대기합니다."
     }
   },
   "chatSendMode": {
@@ -3230,6 +3239,10 @@
       "title": "표시 언어",
       "desc": "화면 문구와 에이전트가 쓰는 리포트·요약·대화 응답의 언어입니다. 선택하면 즉시 적용되고 따로 저장할 필요가 없습니다. 화면 문구 언어는 이 브라우저에만 저장되므로, 브라우저를 바꾸거나 사이트 데이터를 지우면 다시 골라야 합니다. 에이전트 출력 언어는 서버에 저장되어 다른 브라우저에서 접속해도 그대로 적용됩니다.",
       "label": "언어"
+    },
+    "splitNote": {
+      "capture": "분리 모드(offload={mode})입니다. 트래픽 기록은 샌드박스 Agent(artex-agent --traffic)가 담당하며, 이 토글은 Agent 가 announce 한 traffic 조회 도구를 모델에 노출할지 제어합니다. 분리 모드에서는 제어 플레인을 -proxy \"\" 로 띄우세요.",
+      "proxy": "분리 모드(offload={mode})에서는 이 global proxy 설정이 적용되지 않습니다. 상위 egress 프록시는 Agent 기동 시 --egress-proxy 로 지정하세요."
     }
   },
   "llmPage": {
@@ -3760,5 +3773,64 @@
       "name": "취약점 재검증",
       "description": "취약점 상세에서 수동으로 시작해, 원래 증거를 읽고 독립적인 재검증 결론을 저장합니다."
     }
+  },
+  "execAgentsPage": {
+    "title": "실행 Agent (샌드박스)",
+    "subtitle": "위험한 도구를 인터넷과 분리된 샌드박스에서 실행하는 실행 플레인 Agent. LLM 페르소나(에이전트)와 다릅니다.",
+    "refresh": "새로 고침",
+    "loadFailed": "조회 실패: {msg}",
+    "actionFailed": "작업 실패: {msg}",
+    "disabledTitle": "실행 플레인 분리가 비활성화되어 있습니다",
+    "disabledHint": "서버에서 ARTEX_AGENT_LISTEN(= Agent 수신 주소) 또는 ARTEX_AGENT_OFFLOAD(auto|require) 를 설정하면 활성화됩니다. 기본값(off)에서는 모든 도구가 제어 플레인에서 그대로 실행됩니다.",
+    "postureTitle": "실행 플레인 구성",
+    "connectedCount": "연결된 Agent {count}개",
+    "listenAddr": "수신 주소",
+    "listenNone": "(미수신 · Agent 가 dial-in 하지 않음)",
+    "offload": {
+      "off": "off (단일 프로세스)",
+      "auto": "auto (있으면 오프로드)",
+      "require": "require (샌드박스 필수)",
+      "offHint": "기본값. 모든 도구가 제어 플레인에서 in-process 로 실행됩니다(분리 전과 동일).",
+      "autoHint": "연결된 Agent 가 있으면 실행계 도구를 샌드박스로 오프로드하고, 없으면 로컬 폴백합니다.",
+      "requireHint": "보안상 가장 안전한 설정입니다. 실행계 도구는 반드시 샌드박스에서 실행되며, Agent 미연결 시 fail-closed(차단)됩니다.",
+      "pinned": "pinned (작업별 지정 Agent)",
+      "pinnedHint": "가장 엄격. 모든 작업은 명시적으로 선택된 Agent 에서만 실행되며, 선택/연결된 Agent 가 없으면 작업이 시작조차 되지 않습니다(플래닝도 안 돎). 자동 선택·management 폴백 없음."
+    },
+    "issueBundle": "연결 번들 발급",
+    "issueBundleDesc": "새 샌드박스 Agent 용 연결 번들(JSON)을 발급해 다운로드합니다. 샌드박스 안에서 artex-agent --bundle <파일> 로 실행하세요. artex 는 번들만 만들고 샌드박스는 직접 띄웁니다.",
+    "errNoAddress": "주소를 입력해 주세요",
+    "bundleDownloaded": "번들을 다운로드했습니다",
+    "modeLabel": "연결 방향",
+    "modeAgentDials": "Agent → 제어 플레인",
+    "modeMgmtDials": "제어 플레인 → Agent",
+    "modeAgentDialsHint": "Agent 가 제어 플레인으로 dial-in 합니다. 제어 플레인이 수신(ARTEX_AGENT_LISTEN)해야 합니다.",
+    "modeMgmtDialsHint": "제어 플레인이 Agent 로 dial 합니다. Agent 가 수신하며, hostname 검증은 생략하고 CA·CN 핀으로 대체합니다.",
+    "addressLabel": "주소",
+    "addressAgentDialsHint": "Agent 가 접속할 제어 플레인 host:port (예: management.example.com:8790).",
+    "addressMgmtDialsHint": "Agent 가 수신할 host:port (예: 0.0.0.0:8791).",
+    "agentIdLabel": "Agent ID",
+    "agentIdOptional": "(선택 · 비우면 자동 생성)",
+    "download": "발급 + 다운로드",
+    "dialTitle": "Agent 로 접속 (제어 플레인 → Agent)",
+    "dialDesc": "mgmt-dials 모드로 발급된, 수신 중인 Agent 에 지금 접속합니다.",
+    "dialBtn": "접속",
+    "dialOk": "Agent 에 접속했습니다",
+    "errDialFields": "Agent ID 와 주소가 필요합니다",
+    "noAgents": "연결된 Agent 가 없습니다.",
+    "connectedAt": "연결 시각",
+    "toolsCount": "도구 {count}개",
+    "pinLabel": "작업을 이 Agent 에 고정",
+    "taskIdPlaceholder": "task_id",
+    "pinBtn": "고정",
+    "unpinBtn": "해제",
+    "pinOk": "작업을 고정했습니다",
+    "unpinOk": "고정을 해제했습니다",
+    "short": {
+      "off": "단일",
+      "auto": "오프로드",
+      "require": "샌드박스",
+      "pinned": "지정"
+    },
+    "noPins": "고정된 작업이 없습니다"
   }
 }

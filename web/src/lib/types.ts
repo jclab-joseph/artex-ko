@@ -1181,12 +1181,32 @@ export interface MCPServer {
   url?: string;
   enabled: boolean;
   insecure?: boolean; // http: skip TLS cert verification (self-signed servers)
+  agent_hosted?: boolean; // execution-plane split: hosted by the sandbox Agent (not the control plane)
   tools?: string[]; // mcp_tools_cache (names only, for the count)
 }
 
 export interface MCPTool {
   name: string;
   description: string;
+}
+
+// ---- Execution-plane split (sandbox Agents) ----
+// A connected execution Agent (distinct from the LLM-persona "Agent" above). It runs
+// the dangerous tools inside the operator's internet-isolated sandbox over mTLS.
+export interface ExecAgent {
+  id: string;
+  mode: "agent-dials-mgmt" | "mgmt-dials-agent" | string;
+  tools: string[];
+  connected_at: string;
+  remote_addr?: string;
+}
+
+// Response of GET /api/exec-agents: live Agents + the control-plane offload posture.
+export interface ExecAgentsInfo {
+  offload_mode: "off" | "auto" | "require" | string;
+  listen_addr: string;
+  agents: ExecAgent[];
+  pins: Record<string, string>; // task_id → agent_id (ephemeral, in-memory routing pins)
 }
 
 // ---- Skills ----

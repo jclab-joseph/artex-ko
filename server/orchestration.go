@@ -11,6 +11,7 @@ import (
 
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/db"
+	"github.com/Autumn-27/artex/traffic"
 	"github.com/Autumn-27/norma/permission"
 	actool "github.com/Autumn-27/norma/tool"
 )
@@ -38,7 +39,7 @@ func jsonResult(v any) (actool.Result, error) {
 //
 //nolint:unused // used as the hostTools provider in wireAgentAugment
 func (s *Server) hostTools() ([]actool.CoreTool, map[string][]string) {
-	tools := append(s.m.HostTools(), s.orchestrationTools()...)
+	tools := append(s.trafficHostTools(), s.orchestrationTools()...)
 	tools = append(tools, s.findingRetestTools()...)
 	tools = append(tools, s.platformTools()...) // 平台操作工具(建改 skill/工具/MCP，给 Auto 用)
 	custom, err := s.customTools()
@@ -58,6 +59,41 @@ func (s *Server) hostTools() ([]actool.CoreTool, map[string][]string) {
 		}
 	}
 	return tools, deferred
+}
+
+// trafficHostTools returns the traffic query tools to inject into every agent's
+// base list (ToolAugment), honoring split mode:
+//
+//   - Capture on, running in-process (monolith / non-split): the real local tools
+//     bound to this Manager's *Traffic (unchanged behavior).
+//   - Split mode (offload != off) with capture on but no local recorder: metadata-
+//     only placeholders. The per-task backend (AugmentTools → backend.Wrap) turns
+//     them into RPC proxies to the sandbox Agent that hosts the recorder, or leaves
+//     them fail-closed when no Agent is connected. Never a nil-receiver call.
+//   - Capture off: nothing, same as before.
+//
+// Per-agent binding (tools table, default: worker) still decides who sees them.
+func (s *Server) trafficHostTools() []actool.CoreTool {
+	if local := s.m.HostTools(); len(local) > 0 {
+		return local
+	}
+	if s.offloadMode() != "off" && s.m.TrafficEnabled() {
+		return traffic.RemoteToolMetas()
+	}
+	return nil
+}
+
+// trafficRecordingActive reports whether target traffic is being recorded for this
+// deployment — a local MITM (monolith) OR a sandbox Agent hosting the recorder
+// (split mode). It mirrors trafficHostTools' injection condition exactly, so the
+// worker's traffic-tool prompt note appears precisely when traffic_* are callable.
+// Without this, split mode would register the tools but never tell the model to use
+// them (the old signal was the local MITM's CA, absent when Mgmt runs -proxy "").
+func (s *Server) trafficRecordingActive() bool {
+	if !s.m.TrafficEnabled() {
+		return false
+	}
+	return s.m.traffic != nil || s.offloadMode() != "off"
 }
 
 // orchestrationTools returns the cross-task tool set. Bound per-agent via the

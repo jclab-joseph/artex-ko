@@ -32,8 +32,50 @@ const (
 	errFindingTrafficBindingIDsRequired = "binding_ids 는 필수입니다"
 )
 
-func (s *Server) evidenceStore() *evidence.Store {
-	return evidence.New(s.m.pg, s.m.traffic, filepath.Join(s.m.dir, "evidence"))
+// evidenceStore builds a store with no task binding — valid only for read-only paths
+// (serving snapshots, export, GC) that never pull fresh evidence from an Agent. Any path
+// that may READ evidence (Record/Bind) must use evidenceStoreForTask so the split-mode
+// source can route to the task's owning Agent.
+func (s *Server) evidenceStore() *evidence.Store { return s.evidenceStoreForTask("") }
+
+// evidenceStoreForTask builds a store whose split-mode source is bound to the task whose
+// Agent recorded the traffic. taskID is the pin-key (decimal task id).
+func (s *Server) evidenceStoreForTask(taskID string) *evidence.Store {
+	return evidence.New(s.m.pg, s.evidenceSourceForTask(taskID), filepath.Join(s.m.dir, "evidence"))
+}
+
+// evidenceSourceForTask builds the source captured bodies are read from when a finding is
+// bound. It returns a splitEvidenceSource carrying both the local recorder (if any) and the
+// agent registry (if split is enabled); the source then chooses per call — the executing
+// Agent on the ctx, else the local recorder, else the task's pinned Agent (fail closed) —
+// so a multi-Agent / multi-tenant deployment never pulls another tenant's capture. Returns
+// nil only when there is no recorder at all, so a bind fails with a clear "store unavailable"
+// rather than panicking. Read paths don't use this — they serve the snapshot.
+func (s *Server) evidenceSourceForTask(taskID string) evidence.TrafficEvidence {
+	hasRemote := s.offloadMode() != "off" && s.agents != nil
+	if s.m.traffic == nil && !hasRemote {
+		return nil
+	}
+	src := &splitEvidenceSource{taskID: taskID}
+	if s.m.traffic != nil {
+		src.local = s.m.traffic
+	}
+	if hasRemote {
+		src.agents = s.agents
+	}
+	return src
+}
+
+// evidenceTaskKey returns the pin-key (decimal task id) of the task that OWNS a finding's
+// execution — the task whose sandbox Agent recorded the finding's traffic. Split-mode
+// evidence reads route to that Agent. Returns "" when unknown, which makes the remote
+// source fail closed rather than guess an Agent.
+func (s *Server) evidenceTaskKey(findingID int64) string {
+	f, err := s.m.pg.GetFinding(findingID)
+	if err != nil || f == nil || f.TaskID == nil {
+		return ""
+	}
+	return strconv.FormatInt(*f.TaskID, 10)
 }
 
 // Add only new optional properties; preserve edited descriptions, existing
@@ -187,7 +229,7 @@ func (s *Server) bindFindingTraffic(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, errFindingTrafficSelectRequired)
 		return
 	}
-	out, err := s.evidenceStore().Bind(r.Context(), id, body.Refs)
+	out, err := s.evidenceStoreForTask(s.evidenceTaskKey(id)).Bind(r.Context(), id, body.Refs)
 	if err != nil {
 		evidenceError(w, err)
 		return

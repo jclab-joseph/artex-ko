@@ -33,6 +33,7 @@ Thumbs.db
 
 # 内嵌前端的单二进制产物
 /artex
+/artex-agent
 # 一键更新在可执行文件旁留下的中间产物（暂存件 / 备份 / 失败版本 / 升级标记）
 /artex.new
 /artex.new.sha256
@@ -83,3 +84,6 @@ secrets.env
 # artex.exe 를 포그라운드로 띄울 때 리다이렉트한 런타임 로그
 /artex.out.log
 /artex.err.log
+
+# e2e build artifacts
+e2e/dist/

@@ -128,6 +128,7 @@ import type {
   Company,
   DeleteTaskOptions,
   DeleteTaskResult,
+  ExecAgent,
   LLMProfile,
   Task,
   TaskArchive,
@@ -3163,6 +3164,11 @@ function CreateTaskSheet({
   const [seedFirstIntent, setSeedFirstIntent] = React.useState(false); // 创建时下发种子意图,worker 免等首轮 planner 直接开跑;默认关闭,走标准先规划再执行
   const [coverageEnabled, setCoverageEnabled] = React.useState(true); // 资产覆盖度功能;默认开。关闭=不计算/展示覆盖度、不累积范围、隐藏范围类工具(company 关联不受影响)
   const [interceptRules, setInterceptRules] = React.useState<AssetInterceptRuleInput[]>([]); // 任务级资产拦截规则(仅本任务生效,不进全局表)
+  // Execution-plane split: when offload is on (esp. "pinned"), a task is bound to a
+  // sandbox Agent here. Empty in off mode (no picker shown).
+  const [execOffloadMode, setExecOffloadMode] = React.useState("off");
+  const [execAgents, setExecAgents] = React.useState<ExecAgent[]>([]);
+  const [execAgentID, setExecAgentID] = React.useState("");
   // 方式1 文件上传:建任务前把文件暂存到 drafts/<draftId>/uploads/,拿回绝对路径追加进描述。
   const [uploading, setUploading] = React.useState(false);
   const [uploadCount, setUploadCount] = React.useState(0);
@@ -3180,6 +3186,13 @@ function CreateTaskSheet({
       .companies()
       .then(setCompanies)
       .catch(() => setCompanies([]));
+    api
+      .execAgents()
+      .then((r) => {
+        setExecOffloadMode(r.offload_mode);
+        setExecAgents(r.agents);
+      })
+      .catch(() => setExecOffloadMode("off")); // 503/disabled → no picker
   }, []);
 
   // pickFiles uploads the chosen files into this draft's staging dir and appends their
@@ -3229,6 +3242,7 @@ function CreateTaskSheet({
         seedFirstIntent,
         planHeartbeatSeconds: heartbeatSec,
         coverageEnabled,
+        agentId: execAgentID,
         interceptRules: interceptRules
           .map((r) => ({ ...r, pattern: r.pattern.trim() }))
           .filter((r) => r.pattern !== ""),
@@ -3246,6 +3260,7 @@ function CreateTaskSheet({
       setHeartbeatMin("10");
       setSeedFirstIntent(false);
       setCoverageEnabled(true);
+      setExecAgentID("");
       setInterceptRules([]);
       setUploadCount(0);
       draftIdRef.current = "";
@@ -3429,6 +3444,30 @@ function CreateTaskSheet({
                   />
                   <p className="text-muted-foreground text-xs">{t("create.heartbeatHint")}</p>
                 </div>
+                {execOffloadMode !== "off" && (
+                  <div className="grid gap-2">
+                    <Label htmlFor="exec-agent">{t("create.agentLabel")}</Label>
+                    <Select
+                      value={execAgentID || "__none__"}
+                      onValueChange={(v) => setExecAgentID(v === "__none__" ? "" : v)}
+                    >
+                      <SelectTrigger id="exec-agent" className="w-full">
+                        <SelectValue placeholder={t("create.agentPlaceholder")} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">{t("create.agentNone")}</SelectItem>
+                        {execAgents.map((a) => (
+                          <SelectItem key={a.id} value={a.id}>
+                            {a.id}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-muted-foreground text-xs">
+                      {execOffloadMode === "pinned" ? t("create.agentHintPinned") : t("create.agentHint")}
+                    </p>
+                  </div>
+                )}
                 <div className="grid gap-2">
                   <label htmlFor="seed-first-intent" className="flex items-center gap-2 text-sm">
                     <Checkbox

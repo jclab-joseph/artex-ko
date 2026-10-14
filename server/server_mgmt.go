@@ -946,7 +946,10 @@ func (s *Server) pgSaveMCP(w http.ResponseWriter, r *http.Request) {
 	// On initial add, auto-discover + cache the tool list so the UI shows it right
 	// away (bounded so a slow/broken server can't hang the request). Skipped on
 	// plain updates (e.g. enable toggles) to avoid re-spawning the server each time.
-	if isNew && m.Enabled {
+	// Agent-hosted servers are NOT discovered here: they run in the sandbox Agent, so
+	// Management cannot (and must not) spawn/connect them — their tools arrive via the
+	// Agent's announce once it connects with a bundle that carries this server.
+	if isNew && m.Enabled && !m.AgentHosted {
 		m.ID = id
 		ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
 		if derr := s.discoverAndCacheMCP(ctx, &m); derr != nil {

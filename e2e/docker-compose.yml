@@ -1,0 +1,133 @@
+# End-to-end topology for the execution-plane split:
+#
+#   postgres  ── control-plane datastore
+#   management ── Management Server: LLM loop + API + CA, accepts Agents on :8790
+#                 (ARTEX_AGENT_OFFLOAD=require → dangerous tools must run in a sandbox)
+#   provision ── one-shot: mints an Agent connection bundle from management's on-disk CA
+#   agent     ── sandboxed execution plane (agent-dials-mgmt): dials management:8790 over
+#                mTLS, runs tools; NO LLM, NO secrets. The user's own isolated sandbox.
+#   target    ── trivial in-network HTTP target the Agent's recorder captures.
+#   provision-md ── one-shot: mints a mgmt-dials-agent bundle (reverse direction).
+#   agent-md  ── reverse-direction Agent: LISTENS on :8791 and waits for Management to
+#                dial it (POST /api/exec-agents/dial). Stands in for an inbound-only sandbox.
+#
+# e2e/run.sh builds the binaries, brings this up, and drives Bash calls from Management
+# through BOTH connection directions over mTLS, asserting the output came back.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: artex
+      POSTGRES_PASSWORD: e2e-postgres-pw
+      POSTGRES_DB: artex
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U artex -d artex"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  management:
+    build:
+      context: ..
+      dockerfile: e2e/Dockerfile
+    image: artex-e2e:local
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ARTEX_PG_DSN: postgres://artex:e2e-postgres-pw@postgres:5432/artex?sslmode=disable
+      ARTEX_ADMIN_PASSWORD: e2e-admin-password
+      ARTEX_SKILL_DIR: /app/skills
+      # Execution-plane split: accept Agents dialing in, and REQUIRE a sandbox for
+      # any tool execution (fail-closed when none is connected).
+      ARTEX_AGENT_LISTEN: ":8790"
+      ARTEX_AGENT_OFFLOAD: require
+    command: ["artex", "-addr", ":8787", "-data", "/data", "-proxy", ""]
+    volumes:
+      - mgmtdata:/data
+    ports:
+      - "127.0.0.1:8787:8787"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8787/api/health >/dev/null || exit 1"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  # One-shot: issue the Agent's connection bundle from management's CA (same /data
+  # volume), writing it to the shared volume the Agent reads. Runs after management is
+  # healthy so the CA already exists.
+  provision:
+    image: artex-e2e:local
+    depends_on:
+      management:
+        condition: service_healthy
+    # Writes an Agent-hosted MCP config (a stdio server = the mcpstub binary that ships
+    # in the image) then mints a bundle carrying it, so the Agent hosts the MCP server
+    # IN the sandbox and Management drives its tool over the channel.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo '[{"name":"e2estub","transport":"stdio","command":"/usr/local/bin/mcpstub"}]' > /shared/mcp.json &&
+        artex issue-agent -data=/data -mode=agent-dials-mgmt -address=management:8790 \
+          -id=e2e-agent -mcp=/shared/mcp.json -out=/shared/bundle.json
+    volumes:
+      - mgmtdata:/data
+      - shared:/shared
+    restart: "no"
+
+  # A trivial in-network HTTP target the sandboxed Agent can reach. Stands in for a
+  # pentest target; it exists only so the Agent's hosted recorder captures a real
+  # exchange that Management can then query via traffic_search over the channel.
+  target:
+    image: nginx:alpine
+    restart: unless-stopped
+
+  agent:
+    image: artex-e2e:local
+    depends_on:
+      provision:
+        condition: service_completed_successfully
+    # --traffic: host ARTEX's recording MITM proxy + evidence store IN the sandbox.
+    # The Agent's own Bash/WebFetch egress is routed through it, so every target
+    # exchange is captured where the dangerous I/O happens — never on the control
+    # plane — and Management inspects it via traffic_search/get/blob over mTLS.
+    command: ["artex-agent", "--bundle", "/shared/bundle.json", "--work", "/work", "--traffic", "--traffic-addr", "127.0.0.1:8788"]
+    volumes:
+      - shared:/shared
+    restart: unless-stopped
+
+  # One-shot: mint a mgmt-dials-agent bundle for the REVERSE connection direction, where
+  # the Agent LISTENS and Management dials out. -address is the Agent's own listen bind.
+  provision-md:
+    image: artex-e2e:local
+    depends_on:
+      management:
+        condition: service_healthy
+    command:
+      - artex
+      - issue-agent
+      - -data=/data
+      - -mode=mgmt-dials-agent
+      - -address=0.0.0.0:8791
+      - -id=e2e-agent-md
+      - -out=/shared/bundle-md.json
+    volumes:
+      - mgmtdata:/data
+      - shared:/shared
+    restart: "no"
+
+  # Reverse-direction Agent: it listens on :8791 and waits for Management to dial it
+  # (POST /api/exec-agents/dial). Stands in for a sandbox reachable only inbound.
+  agent-md:
+    image: artex-e2e:local
+    depends_on:
+      provision-md:
+        condition: service_completed_successfully
+    command: ["artex-agent", "--bundle", "/shared/bundle-md.json", "--work", "/work"]
+    volumes:
+      - shared:/shared
+    restart: unless-stopped
+
+volumes:
+  mgmtdata:
+  shared:

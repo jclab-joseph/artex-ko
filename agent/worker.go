@@ -12,6 +12,7 @@ import (
 
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/intercept"
+	"github.com/Autumn-27/artex/remoteexec"
 	"github.com/Autumn-27/norma/agentcore"
 	"github.com/Autumn-27/norma/harness"
 	"github.com/Autumn-27/norma/llm"
@@ -58,6 +59,7 @@ type Worker struct {
 	workDir         string
 	proxyAddr       string
 	proxyCACert     string            // recording proxy's CA cert path (for WebFetch HTTPS verify)
+	recording       bool              // traffic capture active (local MITM OR sandbox Agent) → inject the traffic-tool note
 	webSearch       WebSearchOpts     // web_search tool backend selection (off by default)
 	tx              *transcript.Store // raw LLM conversation persistence (nil = off)
 	window          int               // context window in tokens (for compaction)
@@ -188,6 +190,12 @@ func (w *Worker) compactionWindow() int {
 // that MITM proxy. Empty addr disables the hint.
 func (w *Worker) SetProxy(addr, caCert string) { w.proxyAddr, w.proxyCACert = addr, caCert }
 
+// SetRecording marks whether target traffic is being recorded for this run, so the
+// worker injects the traffic-tool note even when the recorder is NOT a local MITM
+// (split mode: the recorder lives in the sandbox Agent, so there is no local CA to
+// infer it from). Defaults false; a local MITM still implies recording via its CA.
+func (w *Worker) SetRecording(on bool) { w.recording = on }
+
 // SetWebSearch selects the web_search backend for this worker (off by default).
 func (w *Worker) SetWebSearch(o WebSearchOpts) { w.webSearch = o }
 
@@ -201,6 +209,18 @@ func (w *Worker) SetWebSearch(o WebSearchOpts) { w.webSearch = o }
 // honor the proxy vars. ALL_PROXY is set too so a socks5 egress proxy (which curl
 // only reads from ALL_PROXY, not HTTP(S)_PROXY) works in the capture-off path.
 // Empty proxyAddr → nil (direct, unchanged env).
+// remoteBashEnv returns the Bash egress env for the control plane. When a sandboxed
+// Agent runs Bash, the control plane sends no egress env at all — the Agent injects
+// its own, pointing at its local recording proxy — so target traffic is captured in
+// the sandbox and no Management-side network hint crosses the boundary. Otherwise it
+// is the ordinary in-process proxyEnv.
+func remoteBashEnv(backend remoteexec.Backend, proxyAddr, caCert string) []string {
+	if backend.IsRemote() && backend.Executes("Bash") {
+		return nil
+	}
+	return proxyEnv(proxyAddr, caCert)
+}
+
 func proxyEnv(proxyAddr, caCert string) []string {
 	if proxyAddr == "" {
 		return nil
@@ -285,12 +305,13 @@ func ensureRunDir(base string, taskID, intentID int64) string {
 // cmdOutDir is the SDK large-tool-output spill dir under an agent's run dir.
 func cmdOutDir(dir string) string { return filepath.Join(dir, "cmd-output") }
 
-func workerSystem(proxyAddr, caCert, dataDir, runDir string) string {
+func workerSystem(proxyAddr, caCert, dataDir, runDir string, recording bool) string {
 	body := renderSystem("worker", workerDefaultTmpl, WorkerVars{ProxyAddr: proxyAddr, DataDir: dataDir, Now: nowStr()})
-	// caCert is present only when the recording MITM is on, which is exactly when
-	// the traffic_* tools are registered — so it gates the traffic-tool note.
+	// A local recording MITM is inferred from its CA (caCert); split mode records in
+	// the sandbox Agent with no local CA, so the server sets `recording` explicitly.
+	// Either way the traffic_* tools are registered, so the note must appear.
 	// Optional finding guidance is added for every role after tool resolution.
-	return body + workerTrafficBlock(caCert != "") + workerArtifactSpec(runDir) + langDirective(resolveOutputLang())
+	return body + workerTrafficBlock(recording || caCert != "") + workerArtifactSpec(runDir) + langDirective(resolveOutputLang())
 }
 
 // renderIntentTask formats the claimed intent for the worker's launch USER message:
@@ -378,6 +399,14 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	// 收敛工具面、减少低价值调用。其余 SDK 默认工具(Read/Write/Edit/LS/Bash/Sleep)照常。
 	base = append(base, defaultToolsExcept("MultiEdit", "Glob", "Grep")...)
 	ctx = WithRunInfo(ctx, RunInfo{TaskID: taskID, ExplorationID: explorationID(ts), IntentID: intent.ID})
+	// Execution-plane split: when a sandboxed Agent handles WebFetch, inject a plain
+	// WebFetch tool so AugmentTools wraps it into a remote proxy, and disable norma's
+	// built-in WebFetch below (it would otherwise egress from the control plane).
+	remoteWebFetch := RemoteWebFetchActive(ctx)
+	base = InjectRemoteWebFetch(ctx, base)
+	// 执行面分离: 백그라운드/대화형 셸은 Agent 호스팅 — 원격 프록시로 주입하고 아래
+	// DisableBackgroundTasks 로 SDK 의 로컬 주입을 끈다(보안 리뷰 F1/F5).
+	base = InjectRemoteBackgroundTools(ctx, base)
 	tools, def, cleanup := AugmentTools(ctx, "worker", base)
 	defer cleanup()
 
@@ -393,7 +422,7 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	// inherit a parent run's background into the action reviewer.
 	ctx = intercept.WithReviewContext(ctx, runDir, intercept.ReviewBackground{})
 	overview := renderWorkerGraphOverview(tsx.graphOverviewData())
-	sysBody := workerSystem(w.proxyAddr, w.proxyCACert, w.workDir, runDir)
+	sysBody := workerSystem(w.proxyAddr, w.proxyCACert, w.workDir, runDir, w.recording)
 	if w.wantConstraints() {
 		sysBody += constraintBlock(ts) // 操作约束(若有)注入系统提示,worker 执行时严格遵守
 	}
@@ -436,9 +465,14 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 		PermissionMode:  permission.ModeBypass,
 		// WebFetch 走记录代理，其 HTTP 与 curl 一样被留痕；载入代理 CA 让经 MITM
 		// 重签的 HTTPS 证书能【正常校验通过】（而非关掉校验）。proxy 空则直连。
-		EnableWebFetch: true,
+		// 执行面分离时(remoteWebFetch)关闭内置 WebFetch，改用上面注入的远程代理工具，
+		// 由 Agent 侧指向其本地记录代理执行。
+		EnableWebFetch: !remoteWebFetch,
 		WebFetchProxy:  w.proxyAddr,
 		WebFetchCACert: w.proxyCACert,
+		// 执行面分离时 백그라운드 매니저는 Agent 에만 둔다 → SDK 의 로컬 Monitor/Task* 주입
+		// 을 끄고(제어 플레인에서 셸 spawn 방지), 위에서 주입한 원격 프록시로 대체한다.
+		DisableBackgroundTasks: remoteWebFetch,
 		// 联网搜索(可选)。ddgs 无需 key；brave-free 需 BraveKey；tavily 需 TavilyKey。
 		// WebSearchProxy 是独立的出口代理(http/https/socks5)，与记录流量的 MITM 代理无关；空则直连。
 		EnableWebSearch:       w.webSearch.Enabled,
@@ -450,7 +484,9 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 		DeepSeekSearchModel:   w.webSearch.DeepSeekModel,
 		WebSearchProxy:        w.webSearch.Proxy,
 		// Bash 子命令的 HTTP 默认走记录代理 + 信任其 CA（工具无需 -x/-k）。
-		BashEnv:    proxyEnv(w.proxyAddr, w.proxyCACert),
+		// 执行面分离时 Bash 在 Agent 侧运行,出口环境由 Agent 本地注入(指向其本地记录代理),
+		// 控制面不下发代理设置,避免把管理侧网络信息带过边界。
+		BashEnv:    ExecBashEnv(ctx, w.proxyAddr, w.proxyCACert),
 		WorkingDir: runDir,
 		MaxTurns:   w.maxTurns, // 0 = unlimited (configurable in agent management)
 		// 墙钟预算,轮边界判,不打断半路;0 = 不限。有任务级 deadline 时夹逼到 min(自身预算,
@@ -494,6 +530,8 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	noaSession := WorkerSessionID(ts.ID(), intent.ID)
 	enableNoa(&opts, w.noaEnabledFn, w.workDir, noaSession, noaWarn(noaSession))
 	ctx = attachSideCapture(ctx, &opts)
+	ctx, endExec := beginExecSession(ctx) // split mode: isolate + tear down this intent run's Agent-hosted state
+	defer endExec()
 	s := agentcore.NewSession(opts)
 	defer s.Close() // release the session's background-task manager (temp dir + processes)
 

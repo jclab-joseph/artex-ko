@@ -361,6 +361,35 @@ func (d *DB) SetParentRef(id int64, parentRef string) error {
 	return err
 }
 
+// SetTaskExecAgent records the execution Agent a task is pinned to (execution-plane
+// "pinned" mode). Empty agentID clears the selection. Persisted so the selection
+// survives a control-plane restart and is restored into the runtime pin map.
+func (d *DB) SetTaskExecAgent(id int64, agentID string) error {
+	_, err := d.Exec(`UPDATE tasks SET exec_agent_id=$2 WHERE id=$1`, id, agentID)
+	return err
+}
+
+// TaskExecAgents returns the persisted task→Agent selections (task id → agent id) for
+// non-archived, non-deleted tasks with a non-empty selection. Used at startup to
+// restore the runtime pin map.
+func (d *DB) TaskExecAgents() (map[string]string, error) {
+	rows, err := d.Query(`SELECT id, exec_agent_id FROM tasks WHERE exec_agent_id <> '' AND archived_at IS NULL AND deleted_at IS NULL`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var id int64
+		var agentID string
+		if err := rows.Scan(&id, &agentID); err != nil {
+			return nil, err
+		}
+		out[strconv.FormatInt(id, 10)] = agentID
+	}
+	return out, rows.Err()
+}
+
 // ListTasks returns alive tasks with pinned tasks first, then newest ids.
 func (d *DB) ListTasks() ([]*Task, error) {
 	// id 是 BIGSERIAL，同一时刻创建的任务也有稳定且唯一的顺序。
