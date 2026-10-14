@@ -3,7 +3,7 @@
 // Every tool call passes through the PreToolUse hook before executing.
 // (The RoE authorization-scope mechanism was removed; a replacement may be added
 // later.) Destructive/exfil gating is no longer hard-coded here — it lives in the
-// DB intercept rules (seeded as ordinary [内置] rules, so users can disable or
+// DB intercept rules (seeded as ordinary [built-in] rules, so users can disable or
 // delete them), evaluated via applyIntercept.
 package guard
 
@@ -100,7 +100,7 @@ func (g *Guard) applyIntercept(ctx context.Context, ev hook.Event) hook.Result {
 	}
 	switch dec.Action {
 	case "deny":
-		// 观测:deny 命中不阻塞审批,直接记一条 denied（历史/任务拦截页可见）。
+		// Observed: a deny hit does not block approval; record a denied entry directly (visible in history / the task intercept page).
 		g.interceptor.Log(ctx, intercept.ConvIDFromContext(ctx), dec, ev.ToolName, ev.Input, "denied")
 		return g.block(ev.ToolName, systemBlockMessage(dec.Message), "")
 	case "allow":
@@ -108,24 +108,23 @@ func (g *Guard) applyIntercept(ctx context.Context, ev hook.Event) hook.Result {
 		g.interceptor.Log(ctx, intercept.ConvIDFromContext(ctx), dec, ev.ToolName, ev.Input, "allowed")
 		return hook.Result{}
 	case "ask":
-		// F14 두뇌 보존 판단: 아래 두 차단 사유와 systemBlockMessage 프레이밍은 번역하지
-		// 않고 중국어 원문을 유지한다. 이 문자열은 g.block → hook.Result.Message 로 에이전트
-		// 에게 돌아가는 tool_result(펜테스트 에이전트가 차단을 표적 방어로 오인해 우회를
-		// 시도하지 않도록 유도하는 의도적 조종 문구, BRIEF 段[A] 성능 보존 대상)이다. 더구나
-		// ask 차단 경로는 deny 경로와 달리 Interceptor.Log 를 타지 않아, g.block → g.record 가
-		// 같은 프레이밍 전문을 감사 로그(GET /api/audit → entries[].reason)에도 그대로 싣는다.
-		// 즉 하나의 문자열이 에이전트 입력과 표시를 겸한다(F16 동형). 표시만 한국어로 떼어내려면
-		// g.block 이 두 문자열을 나르도록 구조를 바꿔야 하는데 고위험·저가치라 보류한다.
+		// The two block reasons below and the systemBlockMessage framing are returned to
+		// the agent as the tool_result (g.block → hook.Result.Message): deliberate framing
+		// so a pentest agent doesn't mistake the block for a target-side defense and try to
+		// evade it. Unlike the deny path, the ask-block path doesn't go through
+		// Interceptor.Log, so g.block → g.record puts the same framing text into the audit
+		// log too (GET /api/audit → entries[].reason) — one string serves both agent input
+		// and display.
 		//
 		// If the worker context is already cancelled (task stopped / killed), block
 		// immediately without creating a pending record — avoids orphaned DB entries
 		// and makes execOne complete fast, reducing the race against drainSynthetic.
 		if ctx.Err() != nil {
-			return g.block(ev.ToolName, systemBlockMessage("工作已取消，平台安全管控阻止执行"), "")
+			return g.block(ev.ToolName, systemBlockMessage("the work was cancelled; the platform safety controls blocked execution"), "")
 		}
 		convID := intercept.ConvIDFromContext(ctx)
 		if !g.interceptor.HandleAsk(ctx, convID, dec, ev.ToolName, ev.Input) {
-			return g.block(ev.ToolName, systemBlockMessage("人工审批未通过（用户拒绝或审批超时）"), "")
+			return g.block(ev.ToolName, systemBlockMessage("manual approval did not pass (user rejected or approval timed out)"), "")
 		}
 		return hook.Result{}
 	}
@@ -135,7 +134,7 @@ func (g *Guard) applyIntercept(ctx context.Context, ev hook.Event) hook.Result {
 // systemBlockMessage frames an intercept block as an ARTEX platform-governance
 // decision so the agent does not mistake it for a target-side defense.
 //
-// The bare reasons ("禁止执行此工具" / "用户拒绝") read exactly like a WAF/403 on
+// The bare reasons ("this tool is forbidden" / "user rejected") read exactly like a WAF/403 on
 // the target, so a pentest agent's instinct is to bypass them — rewrite the
 // command, swap the payload, re-encode, retry. That is both futile (the platform
 // blocks the class of action, not one string) and wrong (it's a policy decision,
@@ -145,8 +144,8 @@ func (g *Guard) applyIntercept(ctx context.Context, ev hook.Event) hook.Result {
 // Audit/history rows keep the raw reason (see Interceptor.Log); only the
 // model-facing tool_result carries this framing.
 func systemBlockMessage(reason string) string {
-	return "【ARTEX 平台管控·非目标防御】此调用被平台拦截。" +
-		"原因：" + reason + "。此操作被禁止。"
+	return "【ARTEX 平台管控·非目标防御】This call was blocked by the platform. " +
+		"Reason: " + reason + ". This operation is prohibited."
 }
 
 var reBlocked = regexp.MustCompile(`(?i)\b(403|forbidden|waf|blocked|rate.?limit|429|captcha|denied)\b`)

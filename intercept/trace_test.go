@@ -95,9 +95,11 @@ func TestTraceSequentialIdenticalCallsAndRunIsolation(t *testing.T) {
 }
 
 func TestTraceBoundsAndMissingResult(t *testing.T) {
-	ctx, trace := WithTrace(context.Background(), strings.Repeat("中文", promptLimit), nil)
+	// Korean filler (3-byte UTF-8 runes) exercises boundary-safe truncation without
+	// relying on ASCII: the trim must not split a multibyte rune.
+	ctx, trace := WithTrace(context.Background(), strings.Repeat("한글", promptLimit), nil)
 	for range contextLimit + 5 {
-		trace.Append(db.InterceptContextEntry{Kind: "text", Text: strings.Repeat("中", entryLimit)})
+		trace.Append(db.InterceptContextEntry{Kind: "text", Text: strings.Repeat("한", entryLimit)})
 	}
 	trace.Start("a", "Read", []byte(`{}`))
 	a := auditFor(WithCall(ctx, "Read", []byte(`{}`)), Decision{}, nil, "pending")
