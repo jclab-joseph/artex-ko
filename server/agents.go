@@ -243,10 +243,10 @@ func (s *Server) resolveExecBackend(t *Task, mode string) remoteexec.Backend {
 	// task from even starting, so this is the belt to execReady's suspenders).
 	if mode == "pinned" {
 		if t != nil {
-			if b, pinned := s.agents.PinnedBackend(t.ID); pinned && b != nil {
-				return b
-			}
-			if _, pinned := s.agents.PinnedBackend(t.ID); pinned {
+			if b, pinned := s.agents.PinnedBackend(t.ID); pinned {
+				if b != nil {
+					return b
+				}
 				return remoteexec.NewFailClosedBackend("이 작업에 선택된 샌드박스 Agent 가 연결되어 있지 않습니다")
 			}
 		}

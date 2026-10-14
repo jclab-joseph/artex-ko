@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"sync"
 
@@ -519,11 +521,27 @@ func (e *Executor) serveCall(ctx context.Context, name string, input json.RawMes
 	if tc.OutputDir != "" {
 		_ = os.MkdirAll(tc.OutputDir, 0o755)
 	}
-	res, err := t.Call(ctx, input, tc)
+	res, err := callToolGuarded(ctx, t, input, tc)
 	if err != nil {
 		return toWireResult(res), err
 	}
 	return toWireResult(res), nil
+}
+
+// callToolGuarded runs a hosted tool and converts a panic in its handler into an ordinary
+// error result. On the control plane the monolith wraps every tool in agent.guardPanic for
+// exactly this reason; Agent-hosted tools (norma built-ins, Agent-hosted MCP, execsvc) are
+// NOT wrapped by it, and they run on serveInbound's goroutine with no recover — so without
+// this a single panicking tool would unwind that goroutine and crash the whole sandbox Agent
+// process, dropping every in-flight call. Recovering here keeps one bad tool call local.
+func callToolGuarded(ctx context.Context, t actool.CoreTool, input json.RawMessage, tc *actool.ToolContext) (res actool.Result, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[remoteexec] tool %s panic: %v\n%s", t.Name(), r, debug.Stack())
+			res, err = actool.Errorf(fmt.Sprintf("工具 %s 内部错误：%v（本次调用已失败，可换个参数或改用别的工具）", t.Name(), r)), nil
+		}
+	}()
+	return t.Call(ctx, input, tc)
 }
 
 // localDir maps a Management-supplied path into the Agent sandbox. Absolute inputs are

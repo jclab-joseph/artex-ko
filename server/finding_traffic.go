@@ -44,21 +44,26 @@ func (s *Server) evidenceStoreForTask(taskID string) *evidence.Store {
 	return evidence.New(s.m.pg, s.evidenceSourceForTask(taskID), filepath.Join(s.m.dir, "evidence"))
 }
 
-// evidenceSourceForTask picks where captured bodies are read from when a finding is bound:
-//   - a local in-process recorder when one runs (monolith / non-split);
-//   - otherwise, in split mode, the sandbox Agent that EXECUTED taskID — not any connected
-//     Agent — over the channel (remoteEvidenceSource), so a multi-Agent / multi-tenant
-//     deployment never pulls another tenant's capture;
-//   - else nil, so a bind without any recorder fails with a clear "store unavailable"
-//     rather than panicking. Read paths don't use this — they serve the snapshot.
+// evidenceSourceForTask builds the source captured bodies are read from when a finding is
+// bound. It returns a splitEvidenceSource carrying both the local recorder (if any) and the
+// agent registry (if split is enabled); the source then chooses per call — the executing
+// Agent on the ctx, else the local recorder, else the task's pinned Agent (fail closed) —
+// so a multi-Agent / multi-tenant deployment never pulls another tenant's capture. Returns
+// nil only when there is no recorder at all, so a bind fails with a clear "store unavailable"
+// rather than panicking. Read paths don't use this — they serve the snapshot.
 func (s *Server) evidenceSourceForTask(taskID string) evidence.TrafficEvidence {
+	hasRemote := s.offloadMode() != "off" && s.agents != nil
+	if s.m.traffic == nil && !hasRemote {
+		return nil
+	}
+	src := &splitEvidenceSource{taskID: taskID}
 	if s.m.traffic != nil {
-		return s.m.traffic
+		src.local = s.m.traffic
 	}
-	if s.offloadMode() != "off" && s.agents != nil {
-		return &remoteEvidenceSource{agents: s.agents, taskID: taskID}
+	if hasRemote {
+		src.agents = s.agents
 	}
-	return nil
+	return src
 }
 
 // evidenceTaskKey returns the pin-key (decimal task id) of the task that OWNS a finding's

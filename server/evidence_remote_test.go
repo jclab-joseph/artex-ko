@@ -98,10 +98,11 @@ func TestRemoteEvidenceRoutesToPinnedAgentNotNewest(t *testing.T) {
 	bSess := connectMarkerAgent(t, ctx, mgr, "tenant-b", "tenant-b")
 	defer bSess.Close()
 
+	// --- Manual-bind path (no backend on the ctx): route via the task's pin. ---
 	// The task was executed by (pinned to) tenant-a — the OLDER connection.
 	mgr.PinTask("42", "tenant-a")
 
-	src := &remoteEvidenceSource{agents: mgr, taskID: "42"}
+	src := &splitEvidenceSource{agents: mgr, taskID: "42"}
 	var got []string
 	if err := src.ReadEvidence(ctx, []string{"x"}, func(e traffic.EvidenceExchange) error {
 		got = append(got, e.URL)
@@ -115,14 +116,30 @@ func TestRemoteEvidenceRoutesToPinnedAgentNotNewest(t *testing.T) {
 
 	// Pinned to an Agent that is not connected → fail closed, never fall back to another.
 	mgr.PinTask("99", "tenant-ghost")
-	ghost := &remoteEvidenceSource{agents: mgr, taskID: "99"}
+	ghost := &splitEvidenceSource{agents: mgr, taskID: "99"}
 	if err := ghost.ReadEvidence(ctx, []string{"x"}, func(traffic.EvidenceExchange) error { return nil }); err == nil {
 		t.Fatal("evidence for a task pinned to a disconnected Agent must fail closed, not fall back to a connected one")
 	}
 
 	// No pin at all → fail closed (must NOT silently use the newest-connected Agent).
-	noPin := &remoteEvidenceSource{agents: mgr, taskID: "no-such-task"}
+	noPin := &splitEvidenceSource{agents: mgr, taskID: "no-such-task"}
 	if err := noPin.ReadEvidence(ctx, []string{"x"}, func(traffic.EvidenceExchange) error { return nil }); err == nil {
 		t.Fatal("evidence for an unpinned task must fail closed, not use the newest-connected Agent")
+	}
+
+	// --- During-run path: the executing Agent's backend is on the ctx. It is authoritative
+	// in every offload mode (require/auto never pin), so evidence must come from THAT Agent
+	// even if a (stale/other) pin points elsewhere. Here the backend is tenant-b while the
+	// task is pinned to tenant-a → evidence must be tenant-b's.
+	runCtx := remoteexec.WithBackend(ctx, mgr.Backend("tenant-b"))
+	var runGot []string
+	if err := src.ReadEvidence(runCtx, []string{"x"}, func(e traffic.EvidenceExchange) error {
+		runGot = append(runGot, e.URL)
+		return nil
+	}); err != nil {
+		t.Fatalf("ReadEvidence via the executing backend failed: %v", err)
+	}
+	if len(runGot) != 1 || runGot[0] != "http://tenant-b/" {
+		t.Fatalf("during a run, evidence must come from the executing Agent on the ctx: %v (want tenant-b)", runGot)
 	}
 }

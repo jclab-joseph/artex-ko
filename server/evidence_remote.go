@@ -10,37 +10,50 @@ import (
 
 	"github.com/Autumn-27/artex/agentctl"
 	"github.com/Autumn-27/artex/evidence"
+	"github.com/Autumn-27/artex/remoteexec"
 	"github.com/Autumn-27/artex/traffic"
 )
 
-// remoteEvidenceSource is the split-mode evidence source: the recorder lives in the
-// sandbox Agent, so the bytes a finding cites are pulled out of it over the channel
-// (via the Agent's __artex_traffic_evidence service) exactly when the finding is
-// bound, then snapshotted into Management's own evidence store like any other. Report
-// rendering afterwards never touches the Agent — the snapshot is self-contained.
+// splitEvidenceSource reads a finding's captured traffic bytes from wherever the task that
+// produced them actually recorded them. The recorder may live in the sandbox Agent (split
+// mode) or in-process (monolith), and in a multi-Agent deployment each Agent is its own
+// tenant — so the source must be chosen per call, never "whatever Agent is connected".
+// ReadEvidence picks, in order:
 //
-// It implements evidence.TrafficEvidence. One id per call bounds each RPC frame
-// (req+resp base64) well under the transport limit; bindings cite only a handful of
-// exchanges, so the extra round-trips are negligible.
-type remoteEvidenceSource struct {
-	agents *agentctl.Manager
-	// taskID is the pin-key of the task that owns these findings. Evidence MUST be pulled
-	// from the sandbox Agent that executed that task (and therefore recorded the traffic),
-	// not from "whatever Agent is connected" — see ReadEvidence.
-	taskID string
+//  1. The executing Agent's backend bound to the ctx. During an agent run (finding recorder,
+//     bind_finding_traffic tool) this is the Agent that ran the task and therefore holds its
+//     capture — authoritative in EVERY offload mode, with no dependence on task pins and no
+//     cross-tenant risk (it is the task's own executor).
+//  2. The local in-process recorder, when one exists (monolith, or a task that executed on
+//     the control plane).
+//  3. Otherwise (e.g. a manual bind with no run context, in split mode): the task's pinned
+//     Agent, failing CLOSED when the task has no pin or its Agent is offline. Never the
+//     newest/any Agent — that would read another tenant's capture (wrong data + leak).
+type splitEvidenceSource struct {
+	local  evidence.TrafficEvidence // in-process recorder (s.m.traffic); nil in strict split mode
+	agents *agentctl.Manager        // nil when the agent control plane is disabled
+	taskID string                   // pin-key of the owning task (for path 3)
 }
 
-var _ evidence.TrafficEvidence = (*remoteEvidenceSource)(nil)
+var _ evidence.TrafficEvidence = (*splitEvidenceSource)(nil)
 
-func (r *remoteEvidenceSource) ReadEvidence(ctx context.Context, ids []string, consume func(traffic.EvidenceExchange) error) error {
+func (r *splitEvidenceSource) ReadEvidence(ctx context.Context, ids []string, consume func(traffic.EvidenceExchange) error) error {
+	// (1) The executing Agent is bound to the ctx during a run — authoritative in all modes.
+	if rb, ok := remoteexec.BackendFrom(ctx).(*remoteexec.RemoteBackend); ok {
+		if sess := rb.Session(); sess != nil {
+			return r.readVia(ctx, ids, consume, func(c context.Context, in json.RawMessage) (*remoteexec.WireResult, error) {
+				return sess.Call(c, traffic.EvidenceToolName, in, &remoteexec.WireToolCtx{WorkingDir: "enrich"}, nil)
+			})
+		}
+	}
+	// (2) Local recorder: monolith, or a task that executed in-process.
+	if r.local != nil {
+		return r.local.ReadEvidence(ctx, ids, consume)
+	}
+	// (3) No run context in split mode: route to the task's OWN Agent; fail closed otherwise.
 	if r.agents == nil {
 		return errors.New("流量录制运行在隔离沙箱 Agent 中，但执行面控制未初始化；无法同步证据。")
 	}
-	// A task's captured traffic lives in the recorder of the ONE Agent that executed it.
-	// Routing to the newest-connected Agent (or any other) would, in a multi-Agent /
-	// multi-tenant deployment where agent == tenant, read a different tenant's capture —
-	// wrong evidence and a cross-tenant data leak. Resolve the task's pinned Agent and fail
-	// closed when it is unknown or disconnected; never fall back to another Agent.
 	agentID := r.agents.PinnedAgentID(r.taskID)
 	if r.taskID == "" || agentID == "" {
 		return errors.New("이 작업에 고정된 실행 Agent 가 없어 증거 출처 Agent 를 특정할 수 없습니다; 교차 테넌트 유출을 막기 위해 증거 동기화를 거부합니다(작업을 실행 Agent 에 고정하세요).")
@@ -48,9 +61,19 @@ func (r *remoteEvidenceSource) ReadEvidence(ctx context.Context, ids []string, c
 	if !r.agents.Has(agentID) {
 		return fmt.Errorf("이 작업을 실행한 샌드박스 Agent(%s)가 연결되어 있지 않아 증거를 동기화할 수 없습니다", agentID)
 	}
+	return r.readVia(ctx, ids, consume, func(c context.Context, in json.RawMessage) (*remoteexec.WireResult, error) {
+		return r.agents.ExecOn(c, agentID, traffic.EvidenceToolName, in)
+	})
+}
+
+// readVia pulls each id's exchange via call (one id per RPC frame keeps req+resp base64 well
+// under the transport limit) and feeds decoded exchanges to consume. Lengths are the decoded
+// body lengths — equal to the original capture since non-oversize bodies cross whole, so the
+// snapshot stays byte-identical to the in-process path.
+func (r *splitEvidenceSource) readVia(ctx context.Context, ids []string, consume func(traffic.EvidenceExchange) error, call func(context.Context, json.RawMessage) (*remoteexec.WireResult, error)) error {
 	for _, id := range ids {
 		in, _ := json.Marshal(map[string][]string{"ids": {id}})
-		res, err := r.agents.ExecOn(ctx, agentID, traffic.EvidenceToolName, in)
+		res, err := call(ctx, in)
 		if err != nil {
 			return err
 		}
@@ -73,9 +96,6 @@ func (r *remoteEvidenceSource) ReadEvidence(ctx context.Context, ids []string, c
 			if err != nil {
 				return err
 			}
-			// Length is the decoded body length — equal to the original capture, since
-			// non-oversize bodies cross whole. writeBody enforces n == ReqLen/RespLen,
-			// so this keeps the snapshot byte-identical to the in-process path.
 			if err := consume(traffic.EvidenceExchange{
 				ID: wx.ID, TS: wx.TS, URL: wx.URL, Method: wx.Method, Status: wx.Status,
 				ContentType: wx.ContentType, ReqHead: wx.ReqHead, RespHead: wx.RespHead,
