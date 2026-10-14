@@ -132,8 +132,8 @@ func (t *ToolSet) SetNotifyFinding(fn func(int64, string)) { t.notifyFinding = f
 // EnrichTrigger is the enrichment engine seen from the tool layer (see package
 // enrich). Kept as an interface here to avoid coupling agent → enrich.
 type EnrichTrigger interface {
-	ResolveDomain(id int64, host string)
-	ProbeSite(id int64, url string)
+	ResolveDomain(taskID, id int64, host string)
+	ProbeSite(taskID, id int64, url string)
 }
 
 // WriteCounts breaks down what a worker persisted this run, by node kind, so the
