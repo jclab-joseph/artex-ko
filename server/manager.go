@@ -392,7 +392,7 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 	// is not silently left relaying; the documented `-proxy ""` is now a backstop, not the
 	// only guard (보안 리뷰: Management 기록 프록시가 실행 정책과 독립적으로 동작).
 	if proxyAddr != "" && strictOffload() {
-		log.Printf("[traffic] 기록 프록시 비활성화: 엄격 오프로드(%s)에서는 제어 플레인 프록시를 띄우지 않습니다(샌드박스 Agent 가 --traffic 로 호스팅)", resolvedOffloadMode())
+		log.Printf("[traffic] recording proxy disabled: under strict offload (%s) the control-plane proxy is not started (the sandbox Agent hosts it via --traffic)", resolvedOffloadMode())
 		proxyAddr = ""
 	}
 	if proxyAddr != "" {

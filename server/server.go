@@ -1676,7 +1676,7 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		s.agents.PinTask(t.ID, agentID)
 		if tid, perr := strconv.ParseInt(t.ID, 10, 64); perr == nil {
 			if perr := s.m.pg.SetTaskExecAgent(tid, agentID); perr != nil {
-				log.Printf("[agentctl] 작업 %s Agent 선택 영속화 실패: %v", t.ID, perr)
+				log.Printf("[agentctl] failed to persist the Agent pin for task %s: %v", t.ID, perr)
 			}
 		}
 	}
