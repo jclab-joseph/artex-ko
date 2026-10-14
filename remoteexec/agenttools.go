@@ -32,7 +32,10 @@ func DefaultAgentTools(webFetchProxy, webFetchCACert string, webFetchInsecureTLS
 func AgentSessionTools() []actool.CoreTool {
 	var out []actool.CoreTool
 	if !actool.BackgroundTasksDisabled() {
-		out = append(out, actool.NewMonitor(), actool.NewTaskOutput(), actool.NewTaskStop(), actool.NewTaskList())
+		// newEgressMonitor replaces actool.NewMonitor() so a monitored background
+		// process egresses through the Agent's recording proxy (tc.Env), which the
+		// stock Monitor omits — see monitor.go (보안 리뷰: Monitor egress-env 누락).
+		out = append(out, newEgressMonitor(), actool.NewTaskOutput(), actool.NewTaskStop(), actool.NewTaskList())
 	}
 	if !actool.InteractiveShellDisabled() {
 		out = append(out, actool.ShellSessionTools()...)
