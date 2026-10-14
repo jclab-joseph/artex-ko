@@ -252,6 +252,11 @@ func (e *Engine) runFinalPlannerRound(ctx context.Context, t *Task) (met bool) {
 	}
 	// 独立 ctx(不挂 execCancel,避免 pause/硬 cancel 打断这最后一轮),带 Final 注入任务超时词。
 	fctx := e.clockCtx(ctx, t, true)
+	// Bind the task's execution backend like every normal planner round (engine.go:952).
+	// Without this the final round ran with LocalBackend, so a fail-closed/require posture
+	// was bypassed and Bash/WebFetch/background tools executed on the control plane
+	// (보안 리뷰: 시간 초과 후 마지막 Planner 가 Management 에서 실행).
+	fctx = e.bindExecBackend(fctx, t)
 	if !e.beginTaskOperation(t.ID) {
 		return false
 	}

@@ -14,6 +14,7 @@ import (
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/intercept"
+	"github.com/Autumn-27/artex/remoteexec"
 	"github.com/Autumn-27/norma/harness"
 	"github.com/Autumn-27/norma/llm"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -167,6 +168,17 @@ type Engine struct {
 	// readiness reports whether a global LLM provider is configured — the signal behind
 	// Ready()/the llm_configured indicator. Wired once at startup; nil → not ready.
 	readiness func() bool
+
+	// execBackend resolves where a task's tool calls execute: a sandboxed Agent's
+	// remote backend, or the in-process LocalBackend. Wired by the server to the
+	// agent-control manager; nil → always local (monolith behavior). Resolved fresh
+	// at each run start so a reconnected Agent is picked up between runs.
+	execBackend func(t *Task) remoteexec.Backend
+
+	// execReady gates whether a task may start/continue planning at all. Used by the
+	// "pinned" offload mode: a task whose selected Agent is not connected stays idle
+	// (no LLM rounds) instead of running on a wrong/absent executor. nil → always ready.
+	execReady func(t *Task) bool
 }
 
 type taskRuntime struct {
@@ -735,6 +747,41 @@ func (e *Engine) appendActivity(t *Task, r db.Activity) (int64, error) {
 // Ready() / the llm_configured indicator). Called once at startup.
 func (e *Engine) SetReadiness(fn func() bool) { e.readiness = fn }
 
+// SetExecBackendResolver installs the resolver that decides where a task's tool calls
+// run (a sandboxed Agent or in-process). Wired once at startup.
+func (e *Engine) SetExecBackendResolver(fn func(t *Task) remoteexec.Backend) {
+	e.execBackend = fn
+}
+
+// SetExecReadyResolver installs the gate deciding whether a task may start planning
+// (used by the "pinned" offload mode). Wired once at startup; nil → always ready.
+func (e *Engine) SetExecReadyResolver(fn func(t *Task) bool) {
+	e.execReady = fn
+}
+
+// execReadyFor reports whether a task's executor precondition is met (always true when
+// no resolver is wired, i.e. monolith / non-pinned modes).
+func (e *Engine) execReadyFor(t *Task) bool {
+	if e.execReady == nil {
+		return true
+	}
+	return e.execReady(t)
+}
+
+// bindExecBackend attaches the task's execution backend to ctx so agent.AugmentTools
+// routes execution tools to the sandboxed Agent (or keeps them local). Resolved per
+// run so Agent reconnects take effect without rebuilding anything.
+func (e *Engine) bindExecBackend(ctx context.Context, t *Task) context.Context {
+	if e.execBackend == nil {
+		return ctx
+	}
+	b := e.execBackend(t)
+	if b == nil {
+		return ctx
+	}
+	return remoteexec.WithBackend(ctx, b)
+}
+
 // SetAgentResolver installs a per-task planner/worker resolver (wired by the server).
 // Called once at startup before any task loop runs, so no lock is needed on reads.
 func (e *Engine) SetAgentResolver(fn func(t *Task) (*agent.Planner, *agent.Worker)) {
@@ -856,6 +903,9 @@ func (e *Engine) plannerLoop(ctx context.Context, t *Task) {
 		if planner == nil {
 			return // idle until LLM configured
 		}
+		if !e.execReadyFor(t) {
+			return // "pinned" mode: idle until this task's selected Agent is connected
+		}
 		if e.IsPaused(t.ID) {
 			return // user-paused: don't plan
 		}
@@ -899,6 +949,7 @@ func (e *Engine) plannerLoop(ctx context.Context, t *Task) {
 		e.touch(t.ID)
 		emit := func(r db.Activity) { e.emitActivity(t, r) }
 		ectx := e.clockCtx(e.execContextFor(ctx, t.ID), t, false) // cancellable by Pause; 带任务 deadline
+		ectx = e.bindExecBackend(ectx, t)                         // route tool execution to the task's sandboxed Agent (if any)
 		if ectx.Err() != nil || e.IsDeleting(t.ID) {
 			return
 		}
@@ -1028,6 +1079,7 @@ func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *ag
 	}
 	// per-work child context so the planner's kill_work can stop just this work.
 	workCtx, workCancel := context.WithCancelCause(ectx)
+	workCtx = e.bindExecBackend(workCtx, t) // route tool execution to the task's sandboxed Agent (if any)
 	e.registerWork(intent.ID, workCancel)
 	// wrap the guard hooks so steer_work can inject a mid-run course-correction
 	// for THIS intent (drained before the worker's next tool call).

@@ -22,7 +22,7 @@ import (
 // hostTools, if set, returns runtime host tools (currently the traffic tools when
 // capture is on) to add to EVERY agent's base list — the DB tools table then
 // filters them per-agent binding. Empty/nil → no host tools this run (capture off).
-func wireAgentAugment(pg *db.DB, skillDir string, hostTools func() ([]actool.CoreTool, map[string][]string)) {
+func wireAgentAugment(pg *db.DB, skillDir string, hostTools func() ([]actool.CoreTool, map[string][]string), mcpHosted func(*db.MCPServer) ([]actool.CoreTool, bool)) {
 	agent.ToolAugment = func(ctx context.Context, agentKey string) ([]actool.CoreTool, agent.DeferredInfo, func()) {
 		a, err := pg.GetAgentByKey(agentKey)
 		if err != nil || a == nil {
@@ -82,6 +82,24 @@ func wireAgentAugment(pg *db.DB, skillDir string, hostTools func() ([]actool.Cor
 				skillGated := gated[m.Name]
 				if !directVisible && !skillGated {
 					continue // neither directly visible nor referenced by a visible skill
+				}
+				// Agent-hosted MCP (split mode): the server runs in the sandbox Agent, not
+				// here. Inject placeholders built from the Agent's announced metadata and
+				// let the per-task backend route calls to the Agent; never connect locally
+				// (Management may not reach it, and a stdio server is a sandbox process).
+				if mcpHosted != nil {
+					if hostedTools, handled := mcpHosted(m); handled {
+						for _, t := range hostedTools {
+							extra = append(extra, t)
+							allNames = append(allNames, t.Name())
+							serverTools[m.Name] = append(serverTools[m.Name], t.Name())
+							if directVisible && !skillGated {
+								globalNames = append(globalNames, t.Name())
+								globalSet[t.Name()] = true
+							}
+						}
+						continue
+					}
 				}
 				cl, err := connectMCP(ctx, m)
 				if err != nil {

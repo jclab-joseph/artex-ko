@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -17,7 +18,10 @@ import (
 	"time"
 
 	"github.com/Autumn-27/artex/agent"
+	"github.com/Autumn-27/artex/agentctl"
 	"github.com/Autumn-27/artex/config"
+	"github.com/Autumn-27/artex/mcpconn"
+	"github.com/Autumn-27/artex/remoteexec"
 	"github.com/Autumn-27/artex/selfupdate"
 	"github.com/Autumn-27/artex/server"
 )
@@ -47,7 +51,68 @@ func printBanner(addr string) {
 // whether to relaunch us (see selfupdate.ExitRestart) — so the body has to live
 // in a function that can *return* rather than os.Exit past its own defers.
 func main() {
+	// Subcommands are dispatched before the default server flags are parsed. Keep this
+	// list tiny; the primary mode is still "run the backend" (no subcommand).
+	if len(os.Args) > 1 && os.Args[1] == "issue-agent" {
+		os.Exit(issueAgentCmd(os.Args[2:]))
+	}
 	os.Exit(run())
+}
+
+// issueAgentCmd mints a sandbox-Agent connection bundle from the Management Server's
+// on-disk CA (created under the data dir on first use, shared with the running server).
+// ARTEX only produces this bundle; the operator injects it into their own sandbox and
+// launches `artex-agent --bundle <file>`. Printing to stdout (or -out) keeps it usable
+// from a container one-shot in CI/compose without going through the authenticated API.
+func issueAgentCmd(args []string) int {
+	fs := flag.NewFlagSet("issue-agent", flag.ExitOnError)
+	dataDir := fs.String("data", filepath.Join(config.BaseDir(), "data"), "data directory holding the control-plane CA")
+	mode := fs.String("mode", string(remoteexec.ModeAgentDials), "connection mode: agent-dials-mgmt | mgmt-dials-agent")
+	address := fs.String("address", "", "agent-dials: Management's reachable host:port; mgmt-dials: the Agent's listen host:port")
+	id := fs.String("id", "", "agent id (optional; auto-generated when empty)")
+	out := fs.String("out", "", "output file for the bundle JSON (default: stdout)")
+	mcpFile := fs.String("mcp", "", "optional JSON file: array of MCP server configs for the Agent to host (db-free alternative to the DB agent_hosted flag)")
+	_ = fs.Parse(args)
+
+	var mcp []mcpconn.Config
+	if *mcpFile != "" {
+		raw, err := os.ReadFile(*mcpFile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "issue-agent: read -mcp %s: %v\n", *mcpFile, err)
+			return 1
+		}
+		if err := json.Unmarshal(raw, &mcp); err != nil {
+			fmt.Fprintf(os.Stderr, "issue-agent: parse -mcp %s: %v\n", *mcpFile, err)
+			return 1
+		}
+	}
+
+	mgr, err := agentctl.NewManager(*dataDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "issue-agent: %v\n", err)
+		return 1
+	}
+	bundle, err := mgr.IssueBundle(remoteexec.ConnMode(*mode), *address, *id, mcp)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "issue-agent: %v\n", err)
+		return 1
+	}
+	raw, err := bundle.Marshal()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "issue-agent: %v\n", err)
+		return 1
+	}
+	if *out == "" {
+		fmt.Println(string(raw))
+		return 0
+	}
+	if err := os.WriteFile(*out, raw, 0o600); err != nil {
+		fmt.Fprintf(os.Stderr, "issue-agent: write %s: %v\n", *out, err)
+		return 1
+	}
+	fmt.Fprintf(os.Stderr, "issue-agent: bundle for %q (mode=%s, expires %s) written to %s\n",
+		bundle.AgentID, bundle.Mode, bundle.Expires.Format("2006-01-02"), *out)
+	return 0
 }
 
 func run() int {
@@ -57,6 +122,13 @@ func run() int {
 		proxy   = flag.String("proxy", "127.0.0.1:8788", "traffic recording proxy address (empty to disable)")
 	)
 	flag.Parse()
+
+	// Fail closed on a misconfigured execution policy: an unrecognized ARTEX_AGENT_OFFLOAD
+	// value must not silently disable the sandbox (보안 리뷰).
+	if err := server.ValidateOffloadEnv(); err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		return 2
+	}
 
 	// hand the build version to the server package so GET /api/health can report it
 	// to the frontend top bar.
