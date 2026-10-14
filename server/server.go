@@ -74,7 +74,7 @@ const (
 	errNotifyDigestRange   = "요약 주기는 1~1440분 사이여야 합니다"
 
 	// 사용자 대면 출력 언어 설정 (putSettings)
-	errOutputLanguageInvalid = "지원하지 않는 언어입니다(en·ko·zh·es 중 하나여야 합니다)"
+	errOutputLanguageInvalid = "지원하지 않는 언어입니다(en·ko·zh·es·ja 중 하나여야 합니다)"
 
 	// 메인 에이전트 대화·세션 (newMainSession / chat)
 	errTaskDeletingNewSession = "작업을 삭제하는 중이라 새 세션을 만들 수 없습니다"
@@ -3435,7 +3435,7 @@ func (s *Server) settingsPayload() map[string]any {
 	// 사용자 대면 출력 언어: 런타임 설정값 > config.Language() 기본값(ARTEX_LANG·설정 파일·한국어).
 	outputLang := s.outputLanguage()
 	return map[string]any{
-		"output_language":          outputLang, // 사용자 대면 출력 언어(en/ko/zh/es)
+		"output_language":          outputLang, // 사용자 대면 출력 언어(en/ko/zh/es/ja)
 		"traffic_capture":          s.m.TrafficEnabled(),
 		"agent_traffic_binding":    s.m.pg.GetBool(settingAgentTrafficBinding, false),
 		"llm_record":               s.m.LLMRecordEnabled(),
@@ -3536,7 +3536,7 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		NotifyEnabled    *bool   `json:"notify_enabled"`
 		NotifyBaseURL    *string `json:"notify_public_base_url"`
 		NotifyDigestMins *int    `json:"notify_digest_interval_min"`
-		// 사용자 대면 출력 언어(en/ko/zh/es). 에이전트 훅이 매 턴 읽으므로 즉시 적용되고
+		// 사용자 대면 출력 언어(en/ko/zh/es/ja). 에이전트 훅이 매 턴 읽으므로 즉시 적용되고
 		// 에이전트를 다시 생성할 필요가 없다. null=변경 안 함.
 		OutputLanguage *string `json:"output_language"`
 	}
@@ -4116,7 +4116,7 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 }
 
 func writeErr(w http.ResponseWriter, code int, msg string) {
-	// 한국어 원문 응답 문구를 활성 출력 언어로 치환한다(en/zh/es). 카탈로그에 없거나
+	// 한국어 원문 응답 문구를 활성 출력 언어로 치환한다(en/zh/es/ja). 카탈로그에 없거나
 	// 한국어이면 원문 그대로 나간다. 하위 계층에서 전파된 임의 err.Error() 는 보통 키에
 	// 없어 그대로 통과한다.
 	writeJSON(w, code, map[string]any{"error": trMsg(msg)})

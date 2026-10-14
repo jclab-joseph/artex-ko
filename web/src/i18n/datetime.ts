@@ -10,6 +10,7 @@ const DATE_LOCALE: Record<Locale, string> = {
   ko: "ko-KR",
   zh: "zh-CN",
   es: "es-ES",
+  ja: "ja-JP",
 };
 
 export function getDateLocale(): string {

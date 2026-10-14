@@ -54,7 +54,7 @@ install_docker(){
   fi
   ok "기동을 완료했습니다 → http://localhost:8787"
   info "첫 접속 시 /setup 화면에서 \"설정 토큰\"을 입력해야 관리자 비밀번호를 만들 수 있습니다"
-  info "설정 토큰 확인: docker compose logs artex | grep '설정 토큰'   (기본 게시 주소는 127.0.0.1 이며 .env 의 ARTEX_BIND 로 바꿉니다)"
+  info "설정 토큰 확인: docker compose logs artex | grep -F '[auth]'   (기본 게시 주소는 127.0.0.1 이며 .env 의 ARTEX_BIND 로 바꿉니다)"
   info "로그 확인: docker compose logs -f artex"
 }
 

@@ -45,8 +45,8 @@ jobs:
       - name: 단위 테스트 (머지 게이트 · vitest)
         # 순수 로직(getInitials/formatCurrency, i18n config, statusMeta)과 i18n 키 정합성 회귀를 머지 전에 잡는다.
         run: npm run test -- --run
-      - name: i18n 로케일 키 정합성 (머지 게이트 · ko 기준 4개 로케일 일치)
-        # ko.json 을 기준으로 en/zh/es 의 키 집합이 완전히 같은지 검사한다(누락·추가 모두 실패).
+      - name: i18n 로케일 키 정합성 (머지 게이트 · ko 기준 5개 로케일 일치)
+        # ko.json 을 기준으로 en/zh/es/ja 의 키 집합이 완전히 같은지 검사한다(누락·추가 모두 실패).
         run: npm run check:i18n
       - name: build:static (머지 게이트 · 타입 검사 포함)
         run: npm run build:static

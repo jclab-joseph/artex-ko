@@ -7,12 +7,13 @@ import { NextIntlClientProvider } from "next-intl";
 
 import enMessages from "../../messages/en.json";
 import esMessages from "../../messages/es.json";
+import jaMessages from "../../messages/ja.json";
 import koMessages from "../../messages/ko.json";
 import zhMessages from "../../messages/zh.json";
 import type { Locale } from "./config";
 import { useActiveLocale } from "./locale-store";
 
-// 네 언어 메시지를 모두 정적으로 번들해 둔다. 그래야 사용자가 설정 화면에서 언어를
+// 다섯 언어 메시지를 모두 정적으로 번들해 둔다. 그래야 사용자가 설정 화면에서 언어를
 // 바꿀 때 재빌드나 페이지 새로고침, 비동기 로딩 없이 그 자리에서 모든 문구가 선택한
 // 언어로 다시 렌더링된다(정적 내보내기 output: "export" 와도 호환된다).
 const MESSAGES: Record<Locale, Record<string, unknown>> = {
@@ -20,6 +21,7 @@ const MESSAGES: Record<Locale, Record<string, unknown>> = {
   ko: koMessages as Record<string, unknown>,
   zh: zhMessages as Record<string, unknown>,
   es: esMessages as Record<string, unknown>,
+  ja: jaMessages as Record<string, unknown>,
 };
 
 // 실행 환경(브라우저·프리렌더 서버)의 시간대.

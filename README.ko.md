@@ -4,9 +4,9 @@
 
 **LLM 멀티 에이전트가 자율적으로 침투 테스트를 수행하는 시스템** (Go 백엔드 + Next.js 프런트엔드)
 
-화면과 산출물은 영어가 기본이며, **설정(시스템 → 설정 → 표시 언어)에서 한국어·중국어·스페인어로도 바꿀 수 있습니다.** 언어를 바꾸면 에이전트가 생성하는 리포트·요약·대화 응답의 언어도 함께 바뀝니다.
+화면과 산출물은 영어가 기본이며, **설정(시스템 → 설정 → 표시 언어)에서 한국어·중국어·스페인어·일본어로도 바꿀 수 있습니다.** 언어를 바꾸면 에이전트가 생성하는 리포트·요약·대화 응답의 언어도 함께 바뀝니다.
 
-한국어 · [中文](README.zh.md) · [English](README.md)
+한국어 · [中文](README.zh.md) · [English](README.md) · [Español](README.es.md) · [日本語](README.ja.md)
 
 [![ci](https://github.com/jiwoochris/artex-global/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/jiwoochris/artex-global/actions/workflows/ci.yml) [![detections](https://github.com/jiwoochris/artex-global/actions/workflows/detections.yml/badge.svg?branch=main)](https://github.com/jiwoochris/artex-global/actions/workflows/detections.yml) [![web](https://github.com/jiwoochris/artex-global/actions/workflows/web.yml/badge.svg?branch=main)](https://github.com/jiwoochris/artex-global/actions/workflows/web.yml) [![license: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 
@@ -60,7 +60,7 @@ ARTEX 는 **자신이 소유하거나 서면으로 명시적 허가를 받은 �
 
 원본 ARTEX 는 프롬프트·UI·문서가 모두 중국어로 되어 있어, 중국어를 쓰지 않는 사용자가 결과를 읽고 팀과 공유하기가 번거로웠습니다. 이 글로벌판은 다음을 목표로 합니다.
 
-- **산출물의 다국어화**: 에이전트가 사람에게 내보내는 탐지 결과·사실 요약·최종 리포트·대화 응답을 설정한 언어(기본 영어이며 한국어·중국어·스페인어로 전환)로 출력하도록 강제합니다. 명령·페이로드·코드·URL·로그 원문은 분석에 필요하므로 원본 그대로 둡니다.
+- **산출물의 다국어화**: 에이전트가 사람에게 내보내는 탐지 결과·사실 요약·최종 리포트·대화 응답을 설정한 언어(기본 영어이며 한국어·중국어·스페인어·일본어로 전환)로 출력하도록 강제합니다. 명령·페이로드·코드·URL·로그 원문은 분석에 필요하므로 원본 그대로 둡니다.
 - **성능 보존**: 에이전트의 판단을 좌우하는 내부 추론 프롬프트(행동 지침 본문)는 번역하지 않습니다. 원문으로 벤치마크된 동작을 유지하고, 출력 언어만 바꿔 번역에서 오는 품질 저하를 피합니다.
 - **법적 고지**: "권한 범위 안에서만 사용" 경고를 분명히 제공하고, 메인테이너가 속한 대한민국 기준으로 정보통신망법·개인정보보호법 고지를 함께 둡니다. 어느 지역에서 쓰든 사용하는 곳의 법이 함께 적용됩니다.
 - **다양한 LLM 스택 대응**: LLM 공급자를 프런티어 모델뿐 아니라 OpenAI 호환 엔드포인트(자국·오픈 모델)로 교체할 수 있습니다. 아래 [설정](#설정)을 참고하십시오.
@@ -71,7 +71,7 @@ ARTEX 는 **자신이 소유하거나 서면으로 명시적 허가를 받은 �
 
 ## 화면 미리 보기
 
-아래 세 화면은 기본값인 영어 UI 입니다(설정에서 한국어·중국어·스페인어로도 바꿀 수 있습니다). 로컬 격리 샌드박스에서 뽑은 데모 데이터이고, 대상은 전부 가상의 `acme.com` 과 사설 대역입니다.
+아래 세 화면은 기본값인 영어 UI 입니다(설정에서 한국어·중국어·스페인어·일본어로도 바꿀 수 있습니다). 로컬 격리 샌드박스에서 뽑은 데모 데이터이고, 대상은 전부 가상의 `acme.com` 과 사설 대역입니다.
 
 <p align="center">
   <img src="screenshots/en/dashboard.png" width="900" alt="대시보드: 전체 개요 화면"><br>
@@ -105,7 +105,7 @@ cd artex-global
 cp .env.example .env          # POSTGRES_PASSWORD 설정, ANTHROPIC_API_KEY 는 선택
 docker compose up -d          # artex 이미지 + postgres 를 함께 기동
 # → http://localhost:8787 접속 (처음 들어가면 /setup 에서 관리자 비밀번호 설정)
-#   /setup 은 기동 로그에 찍힌 "설정 토큰"을 요구합니다: docker compose logs artex | grep '설정 토큰'
+#   /setup 은 기동 로그에 찍힌 "설정 토큰"을 요구합니다: docker compose logs artex | grep -F '[auth]'
 ```
 
 이미지에는 자주 쓰는 도구(ripgrep·curl·vim·npm·nmap 등)가 들어 있고, compose 로 기동하면 `./skills` 와 `./data` 는 바인드 마운트로 호스트에 남아 컨테이너를 다시 만들어도 보존됩니다.
@@ -164,7 +164,7 @@ docker compose up -d          # artex 이미지 + postgres 를 함께 기동
 
 관리자 계정은 하나(`ARTEX`)이고 비밀번호는 첫 접속 때 `/setup` 에서 만듭니다. 비밀번호가 아직 없는 인스턴스에 먼저 닿은 사람이 계정을 차지하지 못하도록 다음 보호가 걸려 있습니다.
 
-- **설정 토큰.** 비밀번호가 없는 상태로 기동하면 서버 콘솔 로그에 `[auth] … 설정 토큰: …` 한 줄이 찍힙니다(Docker 는 `docker compose logs artex`). `/setup` 화면과 `POST /api/auth/init`(`setup_token` 필드)은 이 값이 맞아야 비밀번호를 만들고, 틀린 시도는 횟수 제한에 걸립니다. 무인 배포라면 `ARTEX_SETUP_TOKEN` 으로 토큰을 고정하거나 `ARTEX_ADMIN_PASSWORD` 로 비밀번호를 바로 넣을 수 있습니다(8자 이상).
+- **설정 토큰.** 비밀번호가 없는 상태로 기동하면 서버 콘솔 로그에 `[auth] … Setup token: …` 한 줄이 찍힙니다(기본 언어가 영어라 로그도 영어로 나옵니다. Docker 는 `docker compose logs artex`). `/setup` 화면과 `POST /api/auth/init`(`setup_token` 필드)은 이 값이 맞아야 비밀번호를 만들고, 틀린 시도는 횟수 제한에 걸립니다. 무인 배포라면 `ARTEX_SETUP_TOKEN` 으로 토큰을 고정하거나 `ARTEX_ADMIN_PASSWORD` 로 비밀번호를 바로 넣을 수 있습니다(8자 이상).
 - **기본 바인딩은 127.0.0.1 입니다.** `artex` 의 `-addr` 기본값과 `docker-compose.yml` 의 포트 게시 모두 호스트의 루프백에만 엽니다. 다른 기기에서 직접 접속하려면 `-addr :8787` 또는 `.env` 의 `ARTEX_BIND=0.0.0.0` 으로 바꾸되, 초기 설정을 먼저 마치고 가능하면 아래 리버스 프록시 구성을 쓰십시오. 비밀번호가 없는 채로 루프백이 아닌 주소에 바인딩하면 기동 로그에 경고가 찍힙니다.
 - **비밀번호를 바꾸면 기존 세션이 모두 끊깁니다.** 토큰 서명 키가 비밀번호 해시에 묶여 있어서, 화면의 비밀번호 변경·`reset-password.sh`·DB 직접 수정 어느 쪽이든 이전에 발급된 토큰은 몇 초 안에 무효가 됩니다. 계정이 유출된 뒤 복구할 때는 비밀번호를 바꾼 다음 커스텀 도구·MCP·LLM·알림 설정도 함께 점검하십시오.
 - **CORS.** `/api` 는 `ARTEX_CORS_ORIGINS`(쉼표 구분)에 적힌 출처에만 교차 출처 호출을 허용합니다. 내장 UI 는 동일 출처라 보통 비워 두고, 기본값은 `dev.sh` 의 `next dev`(`http://localhost:5173`)만 허용합니다.

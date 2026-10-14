@@ -121,7 +121,7 @@ def main() -> int:
     if checked == 0:
         print("경고: 검사한 HTML 이 없습니다 — 빌드가 제대로 되었는지 확인하세요.")
         return 2
-    print("중국어(한자) 누출 0 — 사용자 노출 HTML 이 전부 한국어/비한자입니다.")
+    print("중국어(한자) 누출 0 — 사용자 노출 HTML 에 한자가 없습니다.")
     return 0
 
 

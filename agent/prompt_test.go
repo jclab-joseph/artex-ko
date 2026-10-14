@@ -96,6 +96,7 @@ var langMarker = map[string]string{
 	"en": "English",
 	"zh": "简体中文",
 	"es": "Español",
+	"ja": "日本語",
 }
 
 // TestLangDirectiveLocalized pins the output-language tail across all
