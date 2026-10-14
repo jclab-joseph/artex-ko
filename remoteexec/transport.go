@@ -105,11 +105,36 @@ func ListenForAgents(addr string, mgmtID Identity, caPEM []byte) (*AgentListener
 
 // Accept blocks for the next Agent, returning a Management-side Session (call-only; no
 // Dispatcher) and the Agent's hello (id + tool set). The caller controls the hello
-// timeout via ctx.
+// timeout via ctx. It is a convenience that accepts one raw connection and authenticates
+// it inline; a long-lived registry that must not let one stalled peer block others should
+// use AcceptConn + Handshake and run Handshake per-connection in its own goroutine.
 func (l *AgentListener) Accept(ctx context.Context) (*Session, *Frame, error) {
 	conn, err := l.ln.Accept()
 	if err != nil {
 		return nil, nil, err
+	}
+	return l.Handshake(ctx, conn)
+}
+
+// AcceptConn returns the next raw (pre-handshake) connection. The caller must authenticate
+// it with Handshake — ideally in a separate goroutine, so a peer that connects but never
+// completes the TLS handshake / never sends its hello cannot block the accept loop and
+// starve legitimate Agents (보안 리뷰: 미인증 TCP 연결 하나가 Management 수신을 점유).
+func (l *AgentListener) AcceptConn() (net.Conn, error) { return l.ln.Accept() }
+
+// Handshake drives one accepted connection through the TLS handshake (bounded by
+// handshakeTimeout so a silent peer is dropped, not parked) and the Agent hello, binding
+// the announced agent id to the presented client certificate. On any failure it closes the
+// connection/session and returns the error; the caller drops that peer and keeps serving.
+func (l *AgentListener) Handshake(ctx context.Context, conn net.Conn) (*Session, *Frame, error) {
+	if tc, ok := conn.(*tls.Conn); ok {
+		hctx, cancel := context.WithTimeout(ctx, handshakeTimeout)
+		err := tc.HandshakeContext(hctx)
+		cancel()
+		if err != nil {
+			_ = conn.Close()
+			return nil, nil, fmt.Errorf("remoteexec: agent TLS handshake: %w", err)
+		}
 	}
 	sess := newSession(conn, "mgmt", nil)
 	sess.startKeepalive(keepaliveInterval)

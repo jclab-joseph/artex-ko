@@ -182,6 +182,17 @@ func (s *Session) serveInbound(f *Frame) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	s.mu.Lock()
+	if s.closed {
+		// The connection was torn down between the read loop decoding this frame and our
+		// registering it. closeWith() has already snapshotted and cancelled the inbound map,
+		// so registering now would leak an uncancellable call whose context never fires.
+		// Checking closed and registering under the SAME lock closes that window: either we
+		// register before closeWith snapshots (and it cancels us), or we observe closed here
+		// and never start the tool (보안 리뷰: 연결 종료와 호출 등록 경합 시 취소 누락).
+		s.mu.Unlock()
+		cancel()
+		return
+	}
 	s.inbound[f.Id] = cancel
 	s.mu.Unlock()
 

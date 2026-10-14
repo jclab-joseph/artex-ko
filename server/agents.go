@@ -205,6 +205,14 @@ func (p *agentProber) ProbeHTTP(ctx context.Context, rawURL string) (*enrich.HTT
 	if err != nil {
 		return nil, err
 	}
+	if res != nil && res.IsError {
+		// The sandbox probe failed at the connection level (unreachable/TLS/timeout). Mirror
+		// the in-process prober: a failed probe is NOT reflected onto the asset. Returning a
+		// plain (non-ErrProbeLocally) error makes enrich skip the upsert without ever falling
+		// back to probing from the control plane, which would defeat the sandbox isolation
+		// (보안 리뷰: 실패한 프로브를 status:0 으로 자산에 반영).
+		return nil, fmt.Errorf("sandbox http probe failed: %s", resultText(res))
+	}
 	var out execsvc.ProbeResult
 	if e := json.Unmarshal([]byte(resultText(res)), &out); e != nil {
 		return nil, e

@@ -3,6 +3,7 @@ package agentctl
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"strings"
 	"testing"
 	"time"
@@ -212,6 +213,64 @@ func TestAgentDialsRejectsIdSpoof(t *testing.T) {
 	// "alice".
 	if waitFor(1500*time.Millisecond, func() bool { return mgr.HasLive() }) {
 		t.Fatalf("id-spoofed agent must not register, got: %+v", mgr.List())
+	}
+}
+
+// TestManagerListenerNotBlockedByIdlePeer proves one unauthenticated TCP peer that
+// completes neither the TLS handshake nor the hello cannot occupy the Management receive
+// path and starve a legitimate Agent's registration. A silent raw peer is opened first; a
+// real Agent dialing in must still register promptly (보안 리뷰: 미인증 TCP 연결 하나가
+// Management 수신을 막음 — 역방향 Agent 수신에 적용한 개선을 Management 에도 적용).
+func TestManagerListenerNotBlockedByIdlePeer(t *testing.T) {
+	dir := t.TempDir()
+	mgr, err := NewManager(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := mgr.StartListener(ctx, "127.0.0.1:0"); err != nil {
+		t.Fatal(err)
+	}
+	addr := mgr.listener.Addr().String()
+
+	// A raw TCP peer that connects first and sends nothing — it never starts the TLS
+	// handshake, so under the old serial accept loop its waitHello parked the loop for up to
+	// 30s and blocked every other Agent.
+	raw, err := net.DialTimeout("tcp", addr, 2*time.Second)
+	if err != nil {
+		t.Fatalf("raw dial: %v", err)
+	}
+	defer raw.Close()
+
+	// A legitimate Agent dialing in must still register promptly despite the idle peer. The
+	// dial runs in its own goroutine because, under the serial-accept bug, the accept loop is
+	// parked on the idle peer's handshake and the Agent's own TLS handshake would block too —
+	// measuring registration only after the dial returns would hide the stall.
+	bundle, err := mgr.IssueBundle(remoteexec.ModeAgentDials, addr, "live-agent", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec := remoteexec.NewExecutor(remoteexec.DefaultAgentTools("", "", false), t.TempDir(), nil)
+	sessCh := make(chan *remoteexec.Session, 1)
+	go func() {
+		s, e := remoteexec.ConnectAgentSide(ctx, bundle, exec)
+		if e == nil {
+			sessCh <- s
+		}
+	}()
+	t.Cleanup(func() {
+		select {
+		case s := <-sessCh:
+			s.Close()
+		default:
+		}
+	})
+
+	// Well under the 10s handshake deadline a stalled peer would otherwise impose on the
+	// serial loop: the Agent must be registered quickly.
+	if !waitFor(3*time.Second, func() bool { return mgr.Has("live-agent") }) {
+		t.Fatal("a legitimate Agent was blocked from registering by one idle unauthenticated TCP peer")
 	}
 }
 

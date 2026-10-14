@@ -333,25 +333,25 @@ func HTTPProbeTool(egressProxy, egressCA string) actool.CoreTool {
 			_ = json.Unmarshal(in, &sp)
 			res := ProbeResult{}
 			if strings.TrimSpace(sp.URL) == "" {
-				b, _ := json.Marshal(res)
-				return actool.Text(string(b)), nil
+				// No probe happened — don't return a status-0 "success" that the prober would
+				// reflect onto an asset; signal an error so the update is skipped.
+				return actool.Errorf("probe: empty url"), nil
 			}
 			runCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 			defer cancel()
 			req, err := http.NewRequestWithContext(runCtx, "GET", sp.URL, nil)
 			if err != nil {
-				b, _ := json.Marshal(res)
-				return actool.Text(string(b)), nil
+				return actool.Errorf("probe: invalid url: " + err.Error()), nil
 			}
 			req.Header.Set("User-Agent", "artex-enrich/1.0")
-			client := &http.Client{Timeout: 15 * time.Second}
-			if tr := proxyTransport(egressProxy, egressCA); tr != nil {
-				client.Transport = tr
-			}
-			resp, err := client.Do(req)
+			resp, err := probeClient(egressProxy).Do(req)
 			if err != nil {
-				b, _ := json.Marshal(res)
-				return actool.Text(string(b)), nil
+				// A connection-level failure (DNS/refused/TLS/timeout) is not an HTTP status; it
+				// must not be reflected onto the asset as "status 0". Signal an error result so
+				// the control-plane prober skips the asset update, mirroring the in-process enrich
+				// prober, which returns nil (no upsert) on a client.Do error (보안 리뷰: 원격 프로브가
+				// 연결 실패를 status:0·IsError:false 성공으로 반환 / 기존 구현과 동작 불일치).
+				return actool.Errorf("probe failed: " + err.Error()), nil
 			}
 			defer resp.Body.Close()
 			body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
@@ -379,6 +379,31 @@ func Tools(egressProxy, egressCA string) []actool.CoreTool {
 
 func objSchema() map[string]any {
 	return map[string]any{"type": "object", "properties": map[string]any{}}
+}
+
+// probeClient builds the HTTP client for the enrich prober. It mirrors the in-process
+// enrich client (enrich.buildClient) so a sandboxed probe behaves identically to the
+// monolith path it replaced: it does NOT follow redirects (ErrUseLastResponse — a 30x is
+// reported as-is, keeping the probe on the requested target instead of chasing it to a
+// different host), skips TLS verification (pentest targets are commonly self-signed, and the
+// recording proxy re-signs with its MITM CA), and disables keep-alives. egressProxy, when
+// set, routes the probe through the Agent's local recording proxy.
+func probeClient(egressProxy string) *http.Client {
+	tr := &http.Transport{
+		TLSClientConfig:     &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // pentest probe; see doc comment
+		DisableKeepAlives:   true,
+		TLSHandshakeTimeout: 15 * time.Second,
+	}
+	if p := strings.TrimSpace(egressProxy); p != "" {
+		if pu, err := url.Parse(p); err == nil {
+			tr.Proxy = http.ProxyURL(pu)
+		}
+	}
+	return &http.Client{
+		Transport:     tr,
+		Timeout:       15 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
 }
 
 func proxyTransport(proxyStr, caFile string) *http.Transport {

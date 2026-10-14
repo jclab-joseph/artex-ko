@@ -167,20 +167,25 @@ func (m *Manager) StartListener(ctx context.Context, addr string) error {
 	}()
 	go func() {
 		for {
-			if ctx.Err() != nil {
+			conn, err := ln.AcceptConn()
+			if err != nil {
+				// Listener closed (ctx cancelled) or no longer usable — stop accepting.
 				return
 			}
-			acceptCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-			sess, hello, err := ln.Accept(acceptCtx)
-			cancel()
-			if err != nil {
-				if ctx.Err() != nil {
-					return
+			// Authenticate each connection in its own goroutine. A peer that completes neither
+			// the TLS handshake nor the hello only ties up its own goroutine (dropped after the
+			// handshake/hello deadline) and can no longer block the accept loop, so it cannot
+			// starve a legitimate Agent's registration (보안 리뷰: 미인증 TCP 연결 하나가
+			// Management 수신을 점유 — 역방향 수신에 적용한 개선을 Management 에도 적용).
+			go func() {
+				hctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+				defer cancel()
+				sess, hello, herr := ln.Handshake(hctx, conn)
+				if herr != nil {
+					return // bad/stalled/unauthenticated peer; loop keeps serving others
 				}
-				// transient accept/hello error (e.g. a bad client); keep serving
-				continue
-			}
-			m.register(sess, hello, remoteexec.ModeAgentDials)
+				m.register(sess, hello, remoteexec.ModeAgentDials)
+			}()
 		}
 	}()
 	return nil
