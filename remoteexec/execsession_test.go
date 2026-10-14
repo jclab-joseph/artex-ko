@@ -23,6 +23,7 @@ func newBgExecutor(t *testing.T) *Executor {
 	if exec.tools["Monitor"] == nil || exec.tools["TaskList"] == nil {
 		t.Skip("background tools disabled in this environment")
 	}
+	t.Cleanup(exec.EndAllSessions) // kill any background processes a test left running
 	return exec
 }
 

@@ -161,9 +161,18 @@ func DialAgent(ctx context.Context, addr string, mgmtID Identity, caPEM, agentID
 }
 
 func startAgentSession(conn net.Conn, agentID string, exec *Executor) *Session {
-	sess := newSession(conn, "agent", exec)
+	disp := exec.NewConn()
+	sess := newSession(conn, "agent", disp)
 	sess.startKeepalive(keepaliveInterval)
 	sess.sendHello(agentID, exec.ToolNames(), exec.ToolMetas())
+	// When this connection ends (drop or Close), tear down the execution sessions it owns
+	// and mark its epoch dead, so a call whose goroutine was already serving when the
+	// connection dropped is refused instead of recreating a dead connection's session
+	// (보안 리뷰: 연결 종료 후 지연 호출).
+	go func() {
+		<-sess.Done()
+		disp.close()
+	}()
 	return sess
 }
 

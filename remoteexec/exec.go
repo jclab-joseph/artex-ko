@@ -123,6 +123,14 @@ type Executor struct {
 	bgBaseID  string
 	mu        sync.Mutex
 	sessions  map[string]*execSession
+	// connSeq hands out a monotonic epoch per inbound connection; liveConns holds the
+	// epochs still accepting calls. A call tagged with an epoch no longer in liveConns
+	// (its connection was torn down) is refused rather than (re)creating session state —
+	// so a goroutine that was already serving an inbound call when the connection dropped
+	// cannot revive a dead connection's session (보안 리뷰: 연결 종료 후 지연 호출). Epoch 0
+	// is the unmanaged/in-process path (all-in-one, diagnostics, tests) and is always live.
+	connSeq   uint64
+	liveConns map[uint64]bool
 }
 
 // sessState is an execution session's lifecycle. Teardown is a two-step
@@ -147,6 +155,8 @@ type execSession struct {
 	gate   sync.RWMutex
 	ctx    context.Context
 	cancel context.CancelFunc
+	epoch  uint64        // connection that owns this session (0 = unmanaged/in-process)
+	done   chan struct{} // closed when terminate() has fully finished tearing this down
 }
 
 // NewExecutor builds an Executor over the given tools. sandboxRoot is created on
@@ -156,7 +166,55 @@ func NewExecutor(tools []actool.CoreTool, sandboxRoot string, bashEnv []string) 
 	for _, t := range tools {
 		m[t.Name()] = t
 	}
-	return &Executor{tools: m, sandboxRoot: sandboxRoot, bashEnv: bashEnv, sessions: map[string]*execSession{}}
+	return &Executor{tools: m, sandboxRoot: sandboxRoot, bashEnv: bashEnv, sessions: map[string]*execSession{}, liveConns: map[uint64]bool{}}
+}
+
+// connDispatcher is the per-connection Dispatcher wired to each inbound Session. It tags
+// every call with its connection epoch so the Executor can refuse calls that arrive after
+// the connection was torn down (보안 리뷰: 연결 종료 후 지연 호출). Close() ends the
+// connection's sessions and stops it accepting.
+type connDispatcher struct {
+	exec  *Executor
+	epoch uint64
+}
+
+func (c *connDispatcher) ServeCall(ctx context.Context, name string, input json.RawMessage, wtc *WireToolCtx, progress func(string)) (*WireResult, error) {
+	return c.exec.serveCall(ctx, name, input, wtc, progress, c.epoch)
+}
+
+// close ends every session owned by this connection and marks its epoch dead, so later
+// in-flight calls on it are refused instead of recreating state.
+func (c *connDispatcher) close() { c.exec.CloseConn(c.epoch) }
+
+// NewConn opens a per-connection dispatcher with a fresh epoch and marks that epoch live.
+// Each inbound connection gets its own (see startAgentSession); the returned value is both
+// the Dispatcher to wire and the handle whose close() the caller invokes when the
+// connection ends.
+func (e *Executor) NewConn() *connDispatcher {
+	e.mu.Lock()
+	e.connSeq++
+	ep := e.connSeq
+	e.liveConns[ep] = true
+	e.mu.Unlock()
+	return &connDispatcher{exec: e, epoch: ep}
+}
+
+// CloseConn marks a connection epoch dead (no new calls accepted on it) and tears down the
+// sessions it owns. Idempotent.
+func (e *Executor) CloseConn(epoch uint64) {
+	e.mu.Lock()
+	delete(e.liveConns, epoch)
+	var owned []*execSession
+	for id, es := range e.sessions {
+		if es.epoch == epoch {
+			owned = append(owned, es)
+			delete(e.sessions, id)
+		}
+	}
+	e.mu.Unlock()
+	for _, es := range owned {
+		e.terminate(es)
+	}
 }
 
 // EnableBackgroundTasks turns on per-session hosting of norma's Monitor/Task* and
@@ -174,17 +232,22 @@ func (e *Executor) EnableBackgroundTasks(baseID string) error {
 func (e *Executor) Cleanup() { e.EndAllSessions() }
 
 // EndSession tears down one execution session: refuse new calls, cancel in-flight ones,
-// wait for them to drain, then tear down its Manager. Idempotent (a repeat or late call
-// is a no-op), and a never-seen id is recorded as terminated so a call that arrives
-// after it can NOT recreate a Manager under it (보안 리뷰 F3).
-func (e *Executor) EndSession(sessionID string) {
+// wait for them to drain, then tear down its Manager. Idempotent AND synchronous for
+// every caller — a duplicate/late end-session RPC blocks until the teardown that is
+// already in progress has fully finished, so no caller is told "done" before the Manager
+// is actually gone (보안 리뷰: 중복 종료 RPC가 정리 완료 전 성공 반환). A never-seen id is
+// recorded as terminated so a call that arrives after it can NOT recreate a Manager
+// under it. epoch tags the terminated marker to the connection so CloseConn reclaims it.
+func (e *Executor) EndSession(sessionID string) { e.endSession(sessionID, 0) }
+
+func (e *Executor) endSession(sessionID string, epoch uint64) {
 	if sessionID == "" {
 		return
 	}
 	e.mu.Lock()
 	es := e.sessions[sessionID]
 	if es == nil {
-		e.sessions[sessionID] = &execSession{state: sessTerminated}
+		e.sessions[sessionID] = &execSession{state: sessTerminated, epoch: epoch, done: closedChan}
 		e.mu.Unlock()
 		return
 	}
@@ -192,10 +255,9 @@ func (e *Executor) EndSession(sessionID string) {
 	e.terminate(es)
 }
 
-// EndAllSessions tears down every session this Executor holds. Called when the
-// control-plane connection drops (the Agent reuses one Executor across reconnects, and
-// at most one connection is active per ConnectAgentSide) and on process exit, so a
-// dropped connection's sessions and their in-flight calls do not linger.
+// EndAllSessions tears down every session this Executor holds, across all connections.
+// Used by Cleanup on process exit. Per-connection teardown on disconnect goes through
+// CloseConn instead, which also marks the connection's epoch dead.
 func (e *Executor) EndAllSessions() {
 	e.mu.Lock()
 	all := make([]*execSession, 0, len(e.sessions))
@@ -203,6 +265,7 @@ func (e *Executor) EndAllSessions() {
 		all = append(all, es)
 	}
 	e.sessions = map[string]*execSession{}
+	e.liveConns = map[uint64]bool{}
 	e.mu.Unlock()
 	for _, es := range all {
 		e.terminate(es)
@@ -212,11 +275,21 @@ func (e *Executor) EndAllSessions() {
 // terminate drives one session through terminating→terminated. It cancels the session
 // ctx first (so in-flight calls abort promptly), then takes the gate's write lock —
 // which blocks until every in-flight call (gate readers) has drained — before tearing
-// down the Manager, so a concurrent Spawn can never outlive Cleanup.
+// down the Manager, so a concurrent Spawn can never outlive Cleanup. A caller that finds
+// the teardown already in progress waits on es.done until it completes, rather than
+// returning early, so a duplicate end-session RPC never reports success before cleanup.
 func (e *Executor) terminate(es *execSession) {
 	e.mu.Lock()
-	if es.state != sessActive {
+	switch es.state {
+	case sessTerminated:
 		e.mu.Unlock()
+		return
+	case sessTerminating:
+		done := es.done
+		e.mu.Unlock()
+		if done != nil {
+			<-done // another caller is tearing this down; wait for it to finish
+		}
 		return
 	}
 	es.state = sessTerminating
@@ -235,45 +308,82 @@ func (e *Executor) terminate(es *execSession) {
 	e.mu.Lock()
 	es.state = sessTerminated
 	e.mu.Unlock()
+	if es.done != nil {
+		close(es.done) // release any duplicate-end waiters now that cleanup is complete
+	}
 }
 
 // acquireSession returns the live execSession for id with its gate RLocked (the caller
-// must RUnlock), materializing its Manager when needMgr. It returns (nil, nil) when
-// there is no session scope (hosting off, or empty id — diagnostic/all-in-one calls),
-// and (nil, errExecSessionEnded) when the session is terminating/terminated so the
-// caller refuses the call rather than reviving it.
-func (e *Executor) acquireSession(id string, needMgr bool) (*execSession, error) {
-	if !e.bgEnabled || id == "" {
-		return nil, nil
-	}
+// must RUnlock) and a SNAPSHOT of its Manager taken under e.mu. It returns (nil, nil, nil)
+// when there is no session scope (hosting off, or empty id — diagnostic/all-in-one), and
+// (nil, nil, err) when the connection epoch is dead (errConnClosed) or the session is
+// terminating/terminated (errExecSessionEnded) or its Manager could not be built — in
+// each case the caller refuses rather than reviving. The Manager is returned (not read
+// from es.mgr by the caller) so a concurrent acquireSession materializing it on the same
+// session is not a data race (보안 리뷰: Manager 생성·조회 경쟁).
+func (e *Executor) acquireSession(id string, needMgr bool, epoch uint64) (*execSession, *actool.Manager, error) {
 	e.mu.Lock()
+	// Refuse any call whose connection was torn down; epoch 0 is the always-live
+	// unmanaged path (in-process/all-in-one/diagnostics).
+	if epoch != 0 && !e.liveConns[epoch] {
+		e.mu.Unlock()
+		return nil, nil, errConnClosed
+	}
+	if !e.bgEnabled || id == "" {
+		e.mu.Unlock()
+		return nil, nil, nil
+	}
 	es := e.sessions[id]
 	if es == nil {
-		es = &execSession{state: sessActive}
+		es = &execSession{state: sessActive, epoch: epoch, done: make(chan struct{})}
 		es.ctx, es.cancel = context.WithCancel(context.Background())
 		e.sessions[id] = es
 	}
 	if es.state != sessActive {
 		e.mu.Unlock()
-		return nil, errExecSessionEnded
+		return nil, nil, errExecSessionEnded
 	}
 	if needMgr && es.mgr == nil {
 		mgr, err := actool.NewManager(e.bgBaseID + "-" + sanitizeID(id))
 		if err != nil {
 			e.mu.Unlock()
-			return nil, err
+			return nil, nil, err
 		}
 		es.mgr = mgr
 	}
+	mgr := es.mgr // snapshot under e.mu
 	// RLock while holding e.mu is safe and never blocks here: terminate only write-Locks
 	// the gate AFTER setting state!=active under e.mu, and we only reach this on an active
 	// session, so no writer is holding or waiting on this gate.
 	es.gate.RLock()
 	e.mu.Unlock()
-	return es, nil
+	return es, mgr, nil
 }
 
-var errExecSessionEnded = errors.New("remoteexec: execution session has ended")
+var (
+	errExecSessionEnded = errors.New("remoteexec: execution session has ended")
+	errConnClosed       = errors.New("remoteexec: connection has been closed")
+)
+
+// closedChan is a shared, already-closed channel used as the done signal for terminated
+// markers (sessions that never ran a tool), so a wait on it returns immediately.
+var closedChan = func() chan struct{} { ch := make(chan struct{}); close(ch); return ch }()
+
+// wantsBackground reports whether a tool call will need the per-session Manager even
+// though the tool is not strictly session-scoped. Bash runs in the background only when
+// its input sets run_in_background, and that path requires tc.Tasks — so the FIRST such
+// Bash in a session must materialize the Manager, or norma silently falls back to
+// synchronous execution and ignores the flag (보안 리뷰: 첫 Bash가 run_in_background 무시).
+func wantsBackground(name string, input json.RawMessage) bool {
+	if name != "Bash" {
+		return false
+	}
+	var in struct {
+		RunInBackground bool `json:"run_in_background"`
+	}
+	_ = json.Unmarshal(input, &in)
+	return in.RunInBackground
+}
 
 // sessionToolSet names every tool whose state lives on the per-session Manager,
 // independent of the env gates that may exclude some at runtime. Constructing these
@@ -315,7 +425,15 @@ func (e *Executor) ToolNames() []string {
 	return out
 }
 
+// ServeCall serves an inbound call on the unmanaged path (epoch 0): all-in-one /
+// in-process / diagnostics / tests, where there is no connection lifecycle to gate on.
+// Networked connections are served through a per-connection connDispatcher (see NewConn),
+// which carries the connection epoch into serveCall.
 func (e *Executor) ServeCall(ctx context.Context, name string, input json.RawMessage, wtc *WireToolCtx, progress func(string)) (*WireResult, error) {
+	return e.serveCall(ctx, name, input, wtc, progress, 0)
+}
+
+func (e *Executor) serveCall(ctx context.Context, name string, input json.RawMessage, wtc *WireToolCtx, progress func(string), epoch uint64) (*WireResult, error) {
 	sid := ""
 	if wtc != nil {
 		sid = wtc.SessionID
@@ -323,9 +441,10 @@ func (e *Executor) ServeCall(ctx context.Context, name string, input json.RawMes
 	// Reserved control call: tear down one execution session's hosted state. Handled
 	// before tool-registry lookup, so it is ready the moment the dispatcher is wired
 	// (before any call is served). Returning a Result is what confirms teardown to the
-	// caller's EndExecSession (not merely that it was enqueued).
+	// caller's EndExecSession (not merely that it was enqueued) — and endSession blocks
+	// until the teardown actually completes, even for a duplicate request.
 	if name == toolExecSessionEnd {
-		e.EndSession(sid)
+		e.endSession(sid, epoch)
 		return &WireResult{}, nil
 	}
 
@@ -334,24 +453,27 @@ func (e *Executor) ServeCall(ctx context.Context, name string, input json.RawMes
 		return &WireResult{Content: nil, IsError: true}, errNoSuchTool(name)
 	}
 
-	needMgr := sessionToolSet[name]
-	// A session-dependent tool needs a live execution session; refuse it (never share a
-	// Manager, never run sessionless) when hosting is off or no id was supplied.
-	if needMgr && (!e.bgEnabled || sid == "") {
+	// Strictly session-scoped tools (Monitor/Task*/shell_*) REQUIRE a live session and are
+	// refused sessionless. Bash additionally needs the Manager only when backgrounding; a
+	// sessionless background Bash is not refused but falls back to synchronous execution.
+	strictSession := sessionToolSet[name]
+	if strictSession && (!e.bgEnabled || sid == "") {
 		return toWireResult(actool.Errorf("该工具需要一个执行会话（未提供会话标识）；本次调用被拒绝。")), nil
 	}
+	needMgr := strictSession || wantsBackground(name, input)
 
-	es, err := e.acquireSession(sid, needMgr)
+	es, mgr, err := e.acquireSession(sid, needMgr, epoch)
 	if err != nil {
-		// Session is terminating/terminated, or its Manager could not be created. Refuse
-		// without reviving it — the model sees a tool error, not a shared/stale Manager.
+		// Connection closed, session terminating/terminated, or its Manager could not be
+		// built. Refuse without reviving it — the model sees a tool error, never a
+		// shared/stale Manager or a session resurrected on a dead connection.
 		return toWireResult(actool.Errorf("该执行会话已结束或不可用（" + err.Error() + "）；本次调用被拒绝。")), nil
 	}
 
 	tc := &actool.ToolContext{Env: e.bashEnv}
 	if es != nil {
 		defer es.gate.RUnlock()
-		tc.Tasks = es.mgr // nil for a stateless tool that never materialized one
+		tc.Tasks = mgr // snapshot from acquireSession; nil for a stateless tool with no Manager
 		// Bind this call to the session scope so EndSession / a dropped connection can
 		// cancel it in flight, while still honoring the per-call cancel (peer KindCancel).
 		callCtx, cancel := context.WithCancel(ctx)
