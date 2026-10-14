@@ -8,6 +8,10 @@ The upstream ARTEX project's per-version release history (0.3.x and earlier) and
 
 ## [Unreleased]
 
+### Fixed
+
+- Distinguish task report loading failures from empty reports and offer a retry button. Late responses from a previous task cannot replace the current task report.
+
 ## [0.3.15-global.1] · 2026-10-14 · ARTEX-global transition release
 
 The release that turns the Korean edition (`0.3.15-ko.1`) into ARTEX-global, a multilingual edition for defenders and researchers worldwide. Based on upstream ARTEX 0.3.15; no agent features were changed.
@@ -32,6 +36,14 @@ The release that turns the Korean edition (`0.3.15-ko.1`) into ARTEX-global, a m
 ### Localization (i18n)
 
 - **Show built-in agent names and descriptions per language.** The built-in agents (goal decomposition, planning, main, execution, Auto, penetration test, vulnerability retest) are DB seed data (`builtinAgents` in `db/db.go` and the retest agent in `server/finding_retests.go`), so their names, descriptions, and prompt-variable labels used to appear only in Chinese. They are now looked up by agent `key` in `web/messages/` and shown in the current language (falling back to the DB value). User-created agents keep showing their DB values. Applied to the agent list, the editor drawer, and the chat screen; approval/intercept records that come from a chat now show the agent name instead of its internal key (e.g. `pentest`).
+
+### Upstream sync
+
+- **Model judge (fallback approval) token usage is reported separately (upstream 0.3.15, #191).** This upstream change was missing from 0.3.15-ko.1. Judge calls are metered as `worker=judge`, served by the new `GET /api/intercept/judge/usage`. Under the model judge switch in "System → Command interception", a card shows cumulative calls, input, output and cache read/write plus a 30-day daily bar chart.
+
+### Security
+
+- **Closed the remaining gaps in the #22 auth hardening.** A failed password-hash read was still folded into "no password" in token verification and in startup first-run handling, caching an empty hash. Token verification now refuses on a failed read, and startup skips env-var initialisation and setup-token issuance. `ARTEX_ADMIN_PASSWORD` initialisation is also stored once via `InsertSettingIfAbsent` and checked against the 72-byte limit. The `/setup` screen shows a retry notice instead of the form when it cannot confirm the state (the UI part of upstream #197).
 
 ## [0.3.15-ko.1] · 2026-10-12 · First Korean-edition release
 

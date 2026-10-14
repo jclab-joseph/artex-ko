@@ -1048,6 +1048,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/intercept/tool-config", s.interceptSetToolConfig)
 	mux.HandleFunc("GET /api/intercept/judge", s.interceptGetJudgeConfig)
 	mux.HandleFunc("PUT /api/intercept/judge", s.interceptSetJudgeConfig)
+	mux.HandleFunc("GET /api/intercept/judge/usage", s.interceptJudgeUsage) // 모델 판정(대체 승인) 누적 token 사용량
 
 	// 실행 플레인 분리: 샌드박스 Agent 제어(연결 번들 발급·연결 상태·진단 실행).
 	// 경로는 LLM 페르소나용 /api/agents 와 구분하기 위해 /api/exec-agents 를 쓴다.

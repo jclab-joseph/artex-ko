@@ -30,7 +30,10 @@
       "setupToken": "Token de configuración",
       "setupTokenPlaceholder": "El token de 32 caracteres impreso en la línea [auth] del registro de consola del servidor",
       "setupTokenHelp": "Para impedir que otra persona se apropie primero de la cuenta de administrador, introduzca el token de configuración que solo se imprime en la terminal donde se ejecuta el servidor (en Docker: docker compose logs artex).",
-      "errorTokenEmpty": "Introduzca el token de configuración"
+      "errorTokenEmpty": "Introduzca el token de configuración",
+      "unavailableTitle": "No se puede confirmar el estado de la configuración",
+      "unavailableDesc": "El backend o la base de datos no están disponibles temporalmente. Para no sobrescribir una contraseña que ya pueda existir, la configuración está cerrada por ahora. Restaure el servicio y vuelva a intentarlo.",
+      "retry": "Reintentar"
     },
     "terms": {
       "a1Body": "Este software (ARTEX) es un programa de código abierto distribuido bajo la GNU Affero General Public License v3.0 (AGPL-3.0). Bajo esta licencia, usted es libre de usar, copiar, modificar y distribuir el software. No obstante, todas las obras derivadas (incluidos los servicios en línea que se ofrezcan a terceros a través de una red) también deben publicarse bajo la misma AGPL-3.0, y usted debe poner a disposición de los usuarios el código fuente completo correspondiente. El texto completo de la AGPL-3.0 se rige por el archivo LICENSE distribuido junto con el software.",
@@ -265,6 +268,8 @@
       "title": "Informe de test de penetración (Markdown)",
       "copy": "Copiar",
       "loading": "Cargando…",
+      "loadError": "No se pudo cargar el informe. Inténtelo de nuevo.",
+      "retry": "Reintentar",
       "empty": "No hay informe",
       "copySuccess": "Markdown copiado",
       "copyError": "Error al copiar. Seleccione el texto manualmente y cópielo"
@@ -1757,7 +1762,17 @@
       "loadConfigFailed": "Error al cargar los ajustes de respaldo del modelo: {error}",
       "configSaved": "Ajustes de respaldo del modelo guardados",
       "restored": "Se restauró la plantilla integrada predeterminada",
-      "restoreFailed": "Error al restaurar: {error}"
+      "restoreFailed": "Error al restaurar: {error}",
+      "usageTitle": "Uso de tokens del juez",
+      "usageDesc": "Uso acumulado del juez de modelo (aprobación de respaldo). Se mide por separado (worker=judge), sin mezclarse con las estadísticas de cada perfil",
+      "usageRefresh": "Actualizar",
+      "usageCalls": "Llamadas al juez",
+      "usageInput": "Tokens de entrada",
+      "usageOutput": "Tokens de salida",
+      "usageCacheRead": "Lectura de caché",
+      "usageCacheWrite": "Escritura de caché",
+      "usageDaily": "Uso diario, últimos 30 días (entrada + salida)",
+      "usageBarTitle": "{date} · {calls} llamadas · {tokens} tokens"
     }
   },
   "assetInterceptPage": {

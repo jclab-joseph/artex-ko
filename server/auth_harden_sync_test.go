@@ -72,3 +72,86 @@ func TestAuthInitRejectsTooLongPasswordDB(t *testing.T) {
 	})
 	rig.expect(400, code, body, authErrPasswordTooLong)
 }
+
+// 토큰 검증과 기동 시 첫 실행 처리도 읽기 실패를 "비밀번호 없음"으로 접으면 안 된다. 접으면
+// 빈 해시가 캐시되고(passHashLoaded=true), signingKey("") 가 원시 jwt.key 로 떨어진다.
+func TestVerifyTokenFailsClosedWhenDataSourceUnavailable(t *testing.T) {
+	m, err := NewManager(t.TempDir(), "")
+	if err != nil {
+		t.Skipf("postgres unavailable (%v) — skipping", err)
+	}
+	defer m.Close()
+	if err := m.pg.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	s := &Server{m: m, jwtKey: []byte(strings.Repeat("s", 32))}
+	tok, err := signJWT(s.jwtKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.verifyToken(tok) {
+		t.Fatal("비밀번호 상태를 읽을 수 없는 동안에는 어떤 토큰도 통과하면 안 됩니다")
+	}
+}
+
+func TestBootstrapAuthSkipsFirstRunWhenDataSourceUnavailable(t *testing.T) {
+	m, err := NewManager(t.TempDir(), "")
+	if err != nil {
+		t.Skipf("postgres unavailable (%v) — skipping", err)
+	}
+	defer m.Close()
+	if err := m.pg.Close(); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(adminPasswordEnv, "env-admin-pass-123")
+
+	s := &Server{m: m}
+	s.bootstrapAuth()
+	s.authMu.Lock()
+	loaded := s.passHashLoaded
+	s.authMu.Unlock()
+	if loaded {
+		t.Fatal("읽기 실패를 \"비밀번호 없음\"으로 캐시하면 안 됩니다")
+	}
+}
+
+// ARTEX_ADMIN_PASSWORD 초기화도 최초 1회만 써야 한다: 다른 값으로 기동한 두 번째 인스턴스가
+// 기존 비밀번호를 덮어쓰면 안 된다.
+func TestBootstrapAdminPasswordEnvDoesNotOverwriteDB(t *testing.T) {
+	rig := newAuthTestRig(t)
+	t.Setenv(adminPasswordEnv, "first-admin-pass-123")
+	rig.s.bootstrapAuth()
+	first, err := rig.s.reloadPassHash()
+	if err != nil || first == "" {
+		t.Fatalf("첫 인스턴스가 비밀번호를 초기화해야 합니다 (err=%v)", err)
+	}
+
+	// 두 번째 인스턴스: 시작 시점 읽기는 비어 있지 않으므로 바로 돌아가야 하지만, 읽기와
+	// 쓰기 사이의 경합을 흉내 내려고 쓰기 경로를 직접 확인한다.
+	inserted, err := rig.s.m.pg.InsertSettingIfAbsent(authPassKey, "second-hash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inserted {
+		t.Fatal("이미 있는 비밀번호 위에 insert 가 성공하면 안 됩니다")
+	}
+	t.Setenv(adminPasswordEnv, "second-admin-pass-456")
+	s2 := &Server{m: rig.s.m, jwtKey: rig.s.jwtKey}
+	s2.bootstrapAuth()
+	if got, _ := s2.reloadPassHash(); got != first {
+		t.Fatal("두 번째 인스턴스가 기존 비밀번호를 덮어썼습니다")
+	}
+}
+
+func TestBootstrapAdminPasswordEnvRejectsOverBcryptLimitDB(t *testing.T) {
+	rig := newAuthTestRig(t)
+	t.Setenv(adminPasswordEnv, strings.Repeat("a", 73))
+	rig.s.bootstrapAuth()
+	if h, _ := rig.s.reloadPassHash(); h != "" {
+		t.Fatal("72바이트를 넘는 환경 변수 비밀번호는 무시되어야 합니다")
+	}
+	if rig.s.currentSetupToken() == "" {
+		t.Fatal("무시된 뒤에는 설정 토큰이 발급되어야 합니다")
+	}
+}

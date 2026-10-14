@@ -73,6 +73,14 @@ func AugmentTools(ctx context.Context, agentKey string, base []actool.CoreTool) 
 	for i, t := range out {
 		out[i] = guardPanic(backend.Wrap(t))
 	}
+	// Register lowercase/snake_case aliases for the CamelCase built-ins (Bash → bash,
+	// WebFetch → web_fetch) and defer them, so a model that drifts to the model-
+	// conventional spelling still hits the handler while the model keeps seeing only
+	// the official names (see issue #19). Added AFTER backend wrapping so each alias
+	// delegates to the already-wrapped tool: in split mode a drifted spelling (bash)
+	// routes to the sandbox Agent — or is fail-closed-blocked — exactly like the
+	// official name, never around the isolation boundary.
+	out, def.Deferred = addToolAliases(out, def.Deferred)
 	return out, def, cleanup
 }
 

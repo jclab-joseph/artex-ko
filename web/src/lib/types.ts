@@ -1355,6 +1355,22 @@ export interface JudgeConfig {
   ask_timeout_action: "allow" | "deny"; // 审批超时后的默认动作
 }
 
+// JudgeUsage: 모델 판정(대체 승인, judge 레인)의 누적 token 사용량과 최근 N일 일별 시계열.
+export interface JudgeDayUsage {
+  date: string; // YYYY-MM-DD (UTC)
+  calls: number;
+  input_tokens: number;
+  output_tokens: number;
+}
+export interface JudgeUsage {
+  calls: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  daily: JudgeDayUsage[];
+}
+
 export interface InterceptApprovalFilter {
   status?: InterceptPending["status"];
   decision_source?: "rule" | "model" | "unknown";

@@ -30,7 +30,10 @@
       "setupToken": "Setup token",
       "setupTokenPlaceholder": "The 32-character token printed on the [auth] line of the server console log",
       "setupTokenHelp": "To stop anyone else from claiming the admin account first, enter the setup token that is printed only in the terminal running the server (for Docker: docker compose logs artex).",
-      "errorTokenEmpty": "Enter the setup token"
+      "errorTokenEmpty": "Enter the setup token",
+      "unavailableTitle": "Unable to confirm setup status",
+      "unavailableDesc": "The backend or database is temporarily unavailable. To avoid overwriting a password that may already be set, setup is closed for now. Restore the service and try again.",
+      "retry": "Retry"
     },
     "terms": {
       "a1Body": "This software (ARTEX) is an open-source program distributed under the GNU Affero General Public License v3.0 (AGPL-3.0). Under this license you are free to use, copy, modify, and distribute the software. However, all derivative works (including online services provided to third parties over a network) must likewise be released under AGPL-3.0, and you must make the corresponding complete source code available to users. The full terms of AGPL-3.0 are governed by the LICENSE file distributed with the software.",
@@ -265,6 +268,8 @@
       "title": "Penetration Test Report (Markdown)",
       "copy": "Copy",
       "loading": "Loading…",
+      "loadError": "Could not load the report. Please try again.",
+      "retry": "Retry",
       "empty": "No report available",
       "copySuccess": "Markdown copied",
       "copyError": "Copy failed. Select the text manually and copy it"
@@ -1757,7 +1762,17 @@
       "loadConfigFailed": "Failed to load model fallback settings: {error}",
       "configSaved": "Model fallback settings saved",
       "restored": "Reverted to the built-in default template",
-      "restoreFailed": "Restore failed: {error}"
+      "restoreFailed": "Restore failed: {error}",
+      "usageTitle": "Judge token usage",
+      "usageDesc": "Cumulative usage of the model judge (fallback approval). Metered separately (worker=judge), so it is not mixed into per-profile statistics",
+      "usageRefresh": "Refresh",
+      "usageCalls": "Judge calls",
+      "usageInput": "Input tokens",
+      "usageOutput": "Output tokens",
+      "usageCacheRead": "Cache read",
+      "usageCacheWrite": "Cache write",
+      "usageDaily": "Daily usage, last 30 days (input + output)",
+      "usageBarTitle": "{date} · {calls} calls · {tokens} tokens"
     }
   },
   "assetInterceptPage": {

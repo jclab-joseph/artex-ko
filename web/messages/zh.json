@@ -30,7 +30,10 @@
       "setupToken": "设置令牌",
       "setupTokenPlaceholder": "服务器控制台日志 [auth] 行中打印的 32 位令牌",
       "setupTokenHelp": "为防止远程抢占管理员账户，需要输入仅在服务器启动终端（Docker 为 docker compose logs artex）中打印的设置令牌。",
-      "errorTokenEmpty": "请输入设置令牌"
+      "errorTokenEmpty": "请输入设置令牌",
+      "unavailableTitle": "无法确认初始化状态",
+      "unavailableDesc": "后端或数据库暂时不可用。为避免覆盖实例上已有的密码，初始化入口已临时关闭——请恢复服务后重试。",
+      "retry": "重试"
     },
     "terms": {
       "a1Body": "本软件（ARTEX）是一款基于 GNU Affero General Public License v3.0（AGPL-3.0）发布的开源程序。您可依据该协议自由使用、复制、修改和分发本软件；但任何衍生作品（包括通过网络向第三方提供的在线服务）均须同样以 AGPL-3.0 协议开源并向使用者公开对应的完整源代码。AGPL-3.0 完整条款以随附的 LICENSE 文件为准。",
@@ -265,6 +268,8 @@
       "title": "渗透测试报告（Markdown）",
       "copy": "复制",
       "loading": "加载中…",
+      "loadError": "无法加载报告，请重试。",
+      "retry": "重试",
       "empty": "暂无报告",
       "copySuccess": "已复制 Markdown",
       "copyError": "复制失败，请手动选择文本复制"
@@ -1757,7 +1762,17 @@
       "loadConfigFailed": "加载模型兜底配置失败: {error}",
       "configSaved": "模型兜底配置已保存",
       "restored": "已恢复内置默认模板",
-      "restoreFailed": "恢复失败: {error}"
+      "restoreFailed": "恢复失败: {error}",
+      "usageTitle": "审批 Token 消耗",
+      "usageDesc": "模型兜底审批累计用量，单独计量（worker=judge），不与各模型配置的统计混在一起",
+      "usageRefresh": "刷新",
+      "usageCalls": "审批调用",
+      "usageInput": "输入 Token",
+      "usageOutput": "输出 Token",
+      "usageCacheRead": "缓存读",
+      "usageCacheWrite": "缓存写",
+      "usageDaily": "近 30 天每日消耗（输入 + 输出）",
+      "usageBarTitle": "{date} · {calls} 次 · {tokens} tokens"
     }
   },
   "assetInterceptPage": {

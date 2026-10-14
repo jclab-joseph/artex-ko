@@ -85,7 +85,7 @@ func TestAuthInitRequiresSetupTokenDB(t *testing.T) {
 	rig := newAuthTestRig(t)
 	s := rig.s
 	s.bootstrapAuth()
-	if s.cachedPassHash() != "" {
+	if h, _ := s.cachedPassHash(); h != "" {
 		t.Fatal("빈 DB 에서는 비밀번호가 없어야 합니다")
 	}
 	setup := s.currentSetupToken()
@@ -107,7 +107,7 @@ func TestAuthInitRequiresSetupTokenDB(t *testing.T) {
 	}
 	code, body = rig.do(http.MethodPost, "/api/auth/init", "", map[string]any{"password": "attacker-set-password-123!", "setup_token": "guess"})
 	rig.expect(403, code, body, authErrSetupTokenInvalid)
-	if h := s.reloadPassHash(); h != "" {
+	if h, _ := s.reloadPassHash(); h != "" {
 		t.Fatal("거부된 호출이 비밀번호를 저장하면 안 됩니다")
 	}
 
@@ -241,7 +241,7 @@ func TestAuthBootstrapAdminPasswordEnvDB(t *testing.T) {
 	t.Setenv(adminPasswordEnv, "short")
 	s2 := &Server{m: rig.s.m, jwtKey: rig.s.jwtKey}
 	s2.bootstrapAuth()
-	if s2.cachedPassHash() != "" {
+	if h, _ := s2.cachedPassHash(); h != "" {
 		t.Fatal("8자 미만 환경 변수 비밀번호는 무시되어야 합니다")
 	}
 	if s2.currentSetupToken() == "" {
