@@ -138,6 +138,19 @@ export default function SystemSettingsPage() {
       .finally(() => setLoaded(true));
   }, [apply]);
 
+  // Execution-plane offload posture: when the server runs split (offload != off),
+  // target traffic is captured/recorded by the sandbox Agent (artex-agent --traffic),
+  // not here — so the local capture toggle and global egress proxy behave differently.
+  // We surface a note instead of silently presenting controls that no longer apply.
+  const [offloadMode, setOffloadMode] = React.useState<string>("off");
+  React.useEffect(() => {
+    api
+      .execAgents()
+      .then((r) => setOffloadMode(r.offload_mode))
+      .catch(() => setOffloadMode("off")); // 503 (disabled) → treat as non-split
+  }, []);
+  const splitMode = offloadMode !== "off";
+
   const toggleTraffic = (v: boolean) => {
     setTrafficCapture(v); // optimistic
     setSaving(true);
@@ -307,6 +320,13 @@ export default function SystemSettingsPage() {
             </CardTitle>
             <CardDescription>{t.rich("trafficCapture.desc", richTags)}</CardDescription>
           </CardHeader>
+          {splitMode && (
+            <CardContent className="pt-0">
+              <p className="text-muted-foreground border-l-2 border-amber-500/60 pl-3 text-xs leading-relaxed">
+                {t("splitNote.capture", { mode: offloadMode })}
+              </p>
+            </CardContent>
+          )}
           <CardContent className="flex items-center justify-between gap-4">
             <Label htmlFor="traffic-capture" className="text-sm font-normal text-muted-foreground">
               {trafficCapture ? t("trafficCapture.on") : t("trafficCapture.off")}
@@ -352,6 +372,13 @@ export default function SystemSettingsPage() {
             </CardTitle>
             <CardDescription>{t.rich("globalProxy.desc", richTags)}</CardDescription>
           </CardHeader>
+          {splitMode && (
+            <CardContent className="pt-0">
+              <p className="text-muted-foreground border-l-2 border-amber-500/60 pl-3 text-xs leading-relaxed">
+                {t("splitNote.proxy", { mode: offloadMode })}
+              </p>
+            </CardContent>
+          )}
           <CardContent className="flex flex-col gap-2">
             <Label htmlFor="global-proxy" className="text-sm font-normal text-muted-foreground">
               {t("globalProxy.addrLabel")}
