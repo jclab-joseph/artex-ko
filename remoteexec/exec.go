@@ -200,21 +200,33 @@ func (e *Executor) NewConn() *connDispatcher {
 }
 
 // CloseConn marks a connection epoch dead (no new calls accepted on it) and tears down the
-// sessions it owns. Idempotent.
+// sessions it owns. Idempotent. The sessions are left in the map until their teardown has
+// fully completed and only then pruned, so a concurrent Cleanup/EndAllSessions snapshots
+// them and waits on their teardown (via terminate's done channel) rather than missing
+// them and returning while a background process is still being killed (보안 리뷰: Agent
+// 종료 시 진행 중 연결 정리 완료 전 Cleanup 반환).
 func (e *Executor) CloseConn(epoch uint64) {
 	e.mu.Lock()
 	delete(e.liveConns, epoch)
 	var owned []*execSession
-	for id, es := range e.sessions {
+	for _, es := range e.sessions {
 		if es.epoch == epoch {
 			owned = append(owned, es)
-			delete(e.sessions, id)
 		}
 	}
 	e.mu.Unlock()
 	for _, es := range owned {
 		e.terminate(es)
 	}
+	// Teardown complete: now drop this connection's entries (live sessions + terminated
+	// markers). Anything added since is a different epoch and left untouched.
+	e.mu.Lock()
+	for id, es := range e.sessions {
+		if es.epoch == epoch {
+			delete(e.sessions, id)
+		}
+	}
+	e.mu.Unlock()
 }
 
 // EnableBackgroundTasks turns on per-session hosting of norma's Monitor/Task* and
@@ -256,20 +268,27 @@ func (e *Executor) endSession(sessionID string, epoch uint64) {
 }
 
 // EndAllSessions tears down every session this Executor holds, across all connections.
-// Used by Cleanup on process exit. Per-connection teardown on disconnect goes through
-// CloseConn instead, which also marks the connection's epoch dead.
+// Used by Cleanup on process exit. It snapshots the sessions and terminates each WITHOUT
+// removing them from the map first, so a teardown already in progress on another
+// goroutine (a disconnect's CloseConn) is seen and waited on (via terminate's done
+// channel) rather than skipped; the map is cleared only after every teardown has
+// completed (보안 리뷰: Agent 종료 시 진행 중 연결 정리 완료 전 Cleanup 반환). Per-connection
+// teardown on disconnect goes through CloseConn, which also marks the epoch dead.
 func (e *Executor) EndAllSessions() {
 	e.mu.Lock()
 	all := make([]*execSession, 0, len(e.sessions))
 	for _, es := range e.sessions {
 		all = append(all, es)
 	}
-	e.sessions = map[string]*execSession{}
 	e.liveConns = map[uint64]bool{}
 	e.mu.Unlock()
 	for _, es := range all {
 		e.terminate(es)
 	}
+	// Every teardown is now complete; drop all entries (live sessions + terminated markers).
+	e.mu.Lock()
+	e.sessions = map[string]*execSession{}
+	e.mu.Unlock()
 }
 
 // terminate drives one session through terminating→terminated. It cancels the session
@@ -369,20 +388,20 @@ var (
 // markers (sessions that never ran a tool), so a wait on it returns immediately.
 var closedChan = func() chan struct{} { ch := make(chan struct{}); close(ch); return ch }()
 
-// wantsBackground reports whether a tool call will need the per-session Manager even
-// though the tool is not strictly session-scoped. Bash runs in the background only when
-// its input sets run_in_background, and that path requires tc.Tasks — so the FIRST such
-// Bash in a session must materialize the Manager, or norma silently falls back to
-// synchronous execution and ignores the flag (보안 리뷰: 첫 Bash가 run_in_background 무시).
-func wantsBackground(name string, input json.RawMessage) bool {
-	if name != "Bash" {
-		return false
-	}
-	var in struct {
-		RunInBackground bool `json:"run_in_background"`
-	}
-	_ = json.Unmarshal(input, &in)
-	return in.RunInBackground
+// bashToolName is the one non-strict tool that still needs the per-session Manager.
+const bashToolName = "Bash"
+
+// needsManager reports whether a tool call must run against the per-session background
+// Manager. The strict session tools (Monitor/Task*/shell_*) always do. Bash always does
+// too — not only for an explicit run_in_background, but because norma moves even a
+// FOREGROUND command to the background when it exceeds its timeout, and both paths need
+// tc.Tasks. Without a Manager norma silently falls back to synchronous execution, so the
+// same command+timeout would behave differently depending on whether a session tool ran
+// first in the session (보안 리뷰: foreground Bash 시간 초과 처리가 이전 호출에 의존 / 첫
+// Bash가 run_in_background 무시). A sessionless Bash (empty id) still falls back to sync
+// rather than being refused — only strict session tools require a session.
+func needsManager(name string) bool {
+	return sessionToolSet[name] || name == bashToolName
 }
 
 // sessionToolSet names every tool whose state lives on the per-session Manager,
@@ -460,7 +479,7 @@ func (e *Executor) serveCall(ctx context.Context, name string, input json.RawMes
 	if strictSession && (!e.bgEnabled || sid == "") {
 		return toWireResult(actool.Errorf("该工具需要一个执行会话（未提供会话标识）；本次调用被拒绝。")), nil
 	}
-	needMgr := strictSession || wantsBackground(name, input)
+	needMgr := needsManager(name)
 
 	es, mgr, err := e.acquireSession(sid, needMgr, epoch)
 	if err != nil {
