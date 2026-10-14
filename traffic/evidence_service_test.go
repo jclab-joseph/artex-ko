@@ -18,7 +18,7 @@ import (
 func TestEvidenceServiceRoundTrip(t *testing.T) {
 	tr, _ := openTraffic(t)
 	reqBody := []byte(`{"user":"admin","password":"P@ssw0rd"}`)
-	respBody := []byte(`{"token":"abc123","note":"内网测试账号"}`)
+	respBody := []byte(`{"token":"abc123","note":"internal test account"}`)
 	tr.record(newFlow("api.example.com", "POST", "/v1/login", reqBody, respBody))
 	id := onlyExchangeID(t, tr)
 

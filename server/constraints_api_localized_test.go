@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// constraints_api.go 의 제약(约束) 관리 API 에러 응답을 한국어로 유지하는 회귀 방어
+// constraints_api.go 의 제약 관리 API 에러 응답을 한국어로 유지하는 회귀 방어
 // 테스트다. 한국어 판정은 F3a 의 assertKoreanError(한글 포함·중국어 한자 0)를, 응답 본문
 // 추출은 task_categories 테스트의 decodeErrorField 를 재사용한다(같은 package server).
 

@@ -12,7 +12,7 @@ import (
 // 추출은 task_categories 테스트의 decodeErrorField 를 재사용한다(같은 package server).
 
 // TestGoalErrorConstantsLocalized 는 응답 상수 7종이 전부 한국어임을 단언한다. 목표
-// 조회·저장(目标不存在·읽기 실패)은 Store·DB 를 거쳐야 도달하므로 DB 없는 이 호스트에서
+// 조회·저장(목표 없음·읽기 실패)은 Store·DB 를 거쳐야 도달하므로 DB 없는 이 호스트에서
 // 끝까지 못 몰아, 그 문구들은 상수 자체를 단언한다(intent_intervention 선례). 입력 검증·
 // 삭제 장벽 경로는 아래 HTTP 테스트가 응답 본문까지 확인한다.
 func TestGoalErrorConstantsLocalized(t *testing.T) {

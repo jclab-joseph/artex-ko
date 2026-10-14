@@ -90,7 +90,7 @@ func (t *Traffic) EvidenceService() actool.CoreTool {
 				return actool.Errorf(err.Error()), nil
 			}
 			if t == nil {
-				return actool.Errorf("流量录制存储不可用"), nil
+				return actool.Errorf("traffic recording store unavailable"), nil
 			}
 			var out EvidenceWireResult
 			err := t.ReadEvidence(ctx, a.IDs, func(e EvidenceExchange) error {
@@ -132,4 +132,4 @@ func (t *Traffic) EvidenceService() actool.CoreTool {
 
 // ErrEvidenceOversize is returned by the control-plane adapter when a cited body
 // exceeds the inline transfer cap and therefore cannot be synced out of the sandbox.
-var ErrEvidenceOversize = errors.New("流量证据正文超过同步上限，无法从沙箱导出；请在沙箱内生成报告")
+var ErrEvidenceOversize = errors.New("traffic evidence body exceeds the sync cap and cannot be exported from the sandbox; generate the report inside the sandbox")

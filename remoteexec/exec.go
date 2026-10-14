@@ -74,7 +74,7 @@ func (r *remoteTool) Call(ctx context.Context, in json.RawMessage, tc *actool.To
 		if ctx.Err() != nil {
 			return actool.Result{}, ctx.Err()
 		}
-		return actool.Errorf("远程执行通道错误：" + err.Error() + "（本次调用未能在执行端完成）"), nil
+		return actool.Errorf("remote execution channel error: " + err.Error() + " (this call could not be completed on the execution side)"), nil
 	}
 	return fromWireResult(res), nil
 }
@@ -479,7 +479,7 @@ func (e *Executor) serveCall(ctx context.Context, name string, input json.RawMes
 	// sessionless background Bash is not refused but falls back to synchronous execution.
 	strictSession := sessionToolSet[name]
 	if strictSession && (!e.bgEnabled || sid == "") {
-		return toWireResult(actool.Errorf("该工具需要一个执行会话（未提供会话标识）；本次调用被拒绝。")), nil
+		return toWireResult(actool.Errorf("this tool requires an execution session (no session ID was provided); this call is rejected.")), nil
 	}
 	needMgr := needsManager(name)
 
@@ -488,7 +488,7 @@ func (e *Executor) serveCall(ctx context.Context, name string, input json.RawMes
 		// Connection closed, session terminating/terminated, or its Manager could not be
 		// built. Refuse without reviving it — the model sees a tool error, never a
 		// shared/stale Manager or a session resurrected on a dead connection.
-		return toWireResult(actool.Errorf("该执行会话已结束或不可用（" + err.Error() + "）；本次调用被拒绝。")), nil
+		return toWireResult(actool.Errorf("this execution session has ended or is unavailable (" + err.Error() + "); this call is rejected.")), nil
 	}
 
 	tc := &actool.ToolContext{Env: e.bashEnv}
@@ -538,7 +538,7 @@ func callToolGuarded(ctx context.Context, t actool.CoreTool, input json.RawMessa
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("[remoteexec] tool %s panic: %v\n%s", t.Name(), r, debug.Stack())
-			res, err = actool.Errorf(fmt.Sprintf("工具 %s 内部错误：%v（本次调用已失败，可换个参数或改用别的工具）", t.Name(), r)), nil
+			res, err = actool.Errorf(fmt.Sprintf("tool %s internal error: %v (this call failed; try different arguments or a different tool)", t.Name(), r)), nil
 		}
 	}()
 	return t.Call(ctx, input, tc)

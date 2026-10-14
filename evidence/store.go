@@ -61,7 +61,7 @@ func verifyFile(path, hash string, length int64) error {
 		return err
 	}
 	if n != length || hex.EncodeToString(h.Sum(nil)) != hash {
-		return fmt.Errorf("证据正文校验失败: %s", hash)
+		return fmt.Errorf("evidence body verification failed: %s", hash)
 	}
 	return nil
 }
@@ -85,10 +85,10 @@ func (s *Store) writeBody(r io.Reader, expectedLength int64, expectedHash string
 	}
 	hash = hex.EncodeToString(h.Sum(nil))
 	if n != expectedLength {
-		return "", fmt.Errorf("正文不完整: 预期 %d 字节，读取 %d 字节", expectedLength, n)
+		return "", fmt.Errorf("incomplete body: expected %d bytes, read %d bytes", expectedLength, n)
 	}
 	if expectedHash != "" && expectedHash != hash {
-		return "", errors.New("原始流量正文哈希不匹配")
+		return "", errors.New("raw traffic body hash mismatch")
 	}
 	if err = f.Sync(); err != nil {
 		return "", err
@@ -168,7 +168,7 @@ func (s *Store) prepare(ctx context.Context, refs []db.TrafficRef) ([]db.Prepare
 		byID[ref.TrafficID] = ref
 	}
 	if s.Traffic == nil {
-		return nil, errors.New("流量录制存储不可用")
+		return nil, errors.New("traffic recording store unavailable")
 	}
 	err = s.Traffic.ReadEvidence(ctx, ids, func(e traffic.EvidenceExchange) error {
 		rh, err := s.writeBody(e.Request, e.ReqLen, e.ReqHash)
@@ -261,7 +261,7 @@ func (s *Store) OpenBody(snapshot db.TrafficEvidenceSnapshot, side string) (*os.
 	if side == "response" {
 		hash, length = snapshot.RespHash, snapshot.RespLen
 	} else if side != "request" {
-		return nil, 0, errors.New("side 必须为 request 或 response")
+		return nil, 0, errors.New("side must be request or response")
 	}
 	path, err := hashPath(s.Dir, hash)
 	if err != nil {
@@ -329,7 +329,7 @@ func (s *Store) WithInstalledSnapshots(ctx context.Context, snapshots []db.Traff
 	return s.DB.WithEvidenceTx(ctx, func(*sql.Tx) error {
 		for _, v := range snapshots {
 			if v.ID != db.TrafficSnapshotID(v) {
-				return errors.New("归档证据快照元数据哈希不匹配")
+				return errors.New("archived evidence snapshot metadata hash mismatch")
 			}
 			for _, body := range []struct {
 				hash   string

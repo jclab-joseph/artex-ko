@@ -52,7 +52,7 @@ func TestChatMentionErrorsLocalized(t *testing.T) {
 
 	// searchChatMentions — invalid kind and over-long query are rejected before
 	// the database handle is touched, so &Server{} is enough to reach the branch.
-	for _, q := range []string{"kind=unsupported", "q=" + url.QueryEscape(strings.Repeat("字", 201))} {
+	for _, q := range []string{"kind=unsupported", "q=" + url.QueryEscape(strings.Repeat("한", 201))} {
 		w := httptest.NewRecorder()
 		(&Server{}).searchChatMentions(w, httptest.NewRequest("GET", "/api/chat/mentions?"+q, nil))
 		if w.Code != 400 {

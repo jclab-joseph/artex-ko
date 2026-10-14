@@ -137,7 +137,7 @@ func (t *blockedTool) CheckPermissions(ctx context.Context, in json.RawMessage, 
 	return t.meta.CheckPermissions(ctx, in, pc)
 }
 func (t *blockedTool) Call(context.Context, json.RawMessage, *actool.ToolContext) (actool.Result, error) {
-	return actool.Errorf("【ARTEX 平台管控·执行面未就绪】" + t.reason + "（此工具必须在隔离沙箱 Agent 中执行；请连接 Agent 后重试）"), nil
+	return actool.Errorf("【ARTEX Platform Control · Execution Plane Not Ready】" + t.reason + " (this tool must run inside the isolated sandbox Agent; connect an Agent and retry)"), nil
 }
 
 type backendCtxKey struct{}
