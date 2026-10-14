@@ -44,3 +44,36 @@ func TestScriptKillsDetachedChildren(t *testing.T) {
 		t.Fatalf("a detached child survived the script call and wrote %s (process group not killed)", marker)
 	}
 }
+
+// TestScriptTimeoutNotStalledByPipeChild: a child that INHERITS the script's stdout/stderr
+// (no DEVNULL redirect) must not stall CombinedOutput past the timeout — Cmd.Cancel kills
+// the group at the deadline so the call returns promptly and the orphan is reaped before
+// it can write (보안 리뷰: 출력 파이프 상속 시 그룹 정리·타임아웃 지연).
+func TestScriptTimeoutNotStalledByPipeChild(t *testing.T) {
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("python3 unavailable")
+	}
+	work := t.TempDir()
+	marker := filepath.Join(work, "pipe-orphan")
+	// The child inherits the parent's pipes (no stdio redirect) and outlives the 100ms
+	// timeout before writing. Without the Cancel/WaitDelay fix, CombinedOutput blocks on
+	// the inherited pipe until the child exits (~0.8s) and the child writes the marker.
+	code := "import subprocess\n" +
+		"subprocess.Popen(['/bin/sh','-c'," +
+		"\"sleep 0.8; printf child > '" + marker + "'\"])\n" +
+		"print('started')\n"
+	in, _ := json.Marshal(ScriptInput{Code: code, Key: "test", TimeoutMs: 100})
+
+	start := time.Now()
+	if _, err := ScriptTool().Call(context.Background(), in, &actool.ToolContext{WorkingDir: work}); err != nil {
+		t.Fatalf("script call transport error: %v", err)
+	}
+	elapsed := time.Since(start)
+	if elapsed > 2*time.Second {
+		t.Fatalf("call blocked %v on the child's inherited pipe despite a 100ms timeout", elapsed)
+	}
+	time.Sleep(1200 * time.Millisecond) // past the child's 0.8s sleep
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("a pipe-holding child survived the timeout and wrote %s", marker)
+	}
+}

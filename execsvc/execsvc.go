@@ -104,6 +104,11 @@ func resolveInterp(pref string) string {
 	return ""
 }
 
+// scriptWaitDelay caps how long CombinedOutput waits for the stdout/stderr pipe to close
+// after the script process exits or is cancelled, so a child that inherited the pipe and
+// keeps it open cannot hang the call indefinitely (the process group is killed regardless).
+const scriptWaitDelay = 2 * time.Second
+
 func runScript(ctx context.Context, interp, key, code string, params map[string]any, workDir string, sessionEnv []string, timeout time.Duration) (string, error) {
 	toolsDir := filepath.Join(workDir, ".tools")
 	if err := os.MkdirAll(toolsDir, 0o755); err != nil {
@@ -136,18 +141,49 @@ func runScript(ctx context.Context, interp, key, code string, params map[string]
 	}
 	pj, _ := json.Marshal(params)
 	c.Stdin = bytes.NewReader(pj)
-	// Run the script in its own process group and tear the whole group down when the call
-	// returns (normally, on timeout, or on cancellation), so a child it detaches — a
-	// scanner spawned via subprocess.Popen / `&` / nohup — cannot keep running (and keep
-	// writing / egressing) after this call ends (보안 리뷰: 세션 종료 후 자식 프로세스 잔존).
+	// Run the script in its own process group so the WHOLE tree — including anything it
+	// detaches with subprocess.Popen / `&` / nohup — can be killed as a unit. Two things
+	// matter for isolation (보안 리뷰: 출력 파이프 상속 시 그룹 정리·타임아웃 지연):
+	//
+	//   - On timeout/cancel, kill the GROUP (the default CommandContext cancel kills only
+	//     the leader, leaving a detached child running).
+	//   - Do NOT let output collection wait on the stdout/stderr pipe being closed by every
+	//     holder: a child that inherited the pipe would keep the call blocked long past the
+	//     timeout (and keep writing/egressing). So the child's stdout/stderr is a real
+	//     os.Pipe file — Wait then returns when the MAIN process exits, not when the orphan
+	//     closes the fd — and we kill the group the instant Wait returns, reaping the orphan
+	//     before it can act, then drain whatever output was produced (bounded).
 	setProcGroup(c)
-	defer killProcGroup(c)
-	out, err := c.CombinedOutput()
-	body := string(out)
+	c.Cancel = func() error { killProcGroup(c); return nil }
+
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		return "", err
+	}
+	c.Stdout, c.Stderr = pw, pw
+	var buf bytes.Buffer
+	copyDone := make(chan struct{})
+	go func() { _, _ = io.Copy(&buf, pr); close(copyDone) }()
+
+	startErr := c.Start()
+	_ = pw.Close() // the parent keeps no write end; only the child(ren) hold it now
+	if startErr != nil {
+		_ = pr.Close()
+		return "", startErr
+	}
+	waitErr := c.Wait() // returns at MAIN process exit (stdout is a real file → no I/O wait)
+	killProcGroup(c)    // reap any detached child immediately, before it can write/egress
+	_ = pr.Close()      // unblock the copy if a (now-killed) child still held the write fd
+	select {
+	case <-copyDone:
+	case <-time.After(scriptWaitDelay): // backstop; the group is already dead
+	}
+
+	body := buf.String()
 	if runCtx.Err() == context.DeadlineExceeded {
 		body += "\n... [超时终止] ..."
-	} else if err != nil {
-		body += "\n[exit: " + err.Error() + "]"
+	} else if waitErr != nil {
+		body += "\n[exit: " + waitErr.Error() + "]"
 	}
 	return body, nil
 }
