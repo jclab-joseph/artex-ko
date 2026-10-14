@@ -86,6 +86,27 @@ func RemoteExecActive(ctx context.Context) bool {
 	return remoteexec.BackendFrom(ctx).IsRemote()
 }
 
+// beginExecSession opens a fresh execution session for one agentcore session when the
+// run is in split mode, binding a unique id to ctx (so every remote tool call this
+// session issues is keyed by it on the Agent) and returning a cleanup func. The cleanup
+// tells the Agent to tear down that session's background/shell state — on its OWN base
+// context, so it still runs when the run ctx was cancelled. Callers defer it alongside
+// Session.Close so the remote teardown follows the local session's end. No-op (and no
+// id, no RPC) when execution is in-process (보안 리뷰 F2/F3).
+//
+// A fresh id per agentcore session — not the reused transcript SessionID — is what
+// keeps a previous run's late teardown from killing the next run's processes.
+func beginExecSession(ctx context.Context) (context.Context, func()) {
+	b := remoteexec.BackendFrom(ctx)
+	if !b.IsRemote() {
+		return ctx, func() {}
+	}
+	id := remoteexec.NewExecSessionID()
+	return remoteexec.WithExecSession(ctx, id), func() {
+		remoteexec.EndExecSession(context.Background(), b, id)
+	}
+}
+
 // RemoteWebFetchActive reports whether WebFetch must be routed to the sandbox Agent
 // (true whenever execution is remote — WebFetch is an execution-plane tool and may never
 // egress from the control plane in split mode). Roles use it to disable norma's

@@ -192,6 +192,11 @@ func run() int {
 		log.Printf("[agent] 관리 서버와 연결되었습니다. 실행 대기 중.")
 		select {
 		case <-sess.Done():
+			// The control-plane connection dropped: tear down every execution session it
+			// owned (kill background processes / PTYs, cancel in-flight calls) so a reused
+			// Executor does not carry a dead connection's state into the next one
+			// (보안 리뷰 F3). The next connection issues fresh, unique session ids.
+			exec.EndAllSessions()
 			if ctx.Err() != nil {
 				return 0
 			}

@@ -320,7 +320,13 @@ func (m *Manager) Exec(ctx context.Context, agentID, tool string, input json.Raw
 	if a == nil {
 		return nil, errors.New("agentctl: agent not connected: " + agentID)
 	}
-	return a.sess.Call(ctx, tool, input, &remoteexec.WireToolCtx{WorkingDir: "diag"}, nil)
+	// Diagnostic calls get their own execution session + teardown, so that if one ever
+	// drives a session-dependent tool its Agent-hosted state is isolated and reclaimed,
+	// never shared with a task's session (보안 리뷰 F2/F3).
+	execID := remoteexec.NewExecSessionID()
+	res, err := a.sess.Call(ctx, tool, input, &remoteexec.WireToolCtx{WorkingDir: "diag", SessionID: execID}, nil)
+	remoteexec.EndExecSession(context.Background(), a.backend, execID)
+	return res, err
 }
 
 // ExecAny runs one tool on the most-recently connected Agent — used by process-global
@@ -338,6 +344,10 @@ func (m *Manager) ExecAny(ctx context.Context, tool string, input json.RawMessag
 	if newest == nil {
 		return nil, errors.New("agentctl: no agent connected")
 	}
+	// No SessionID: the enrich pool drives only execsvc asset-probe tools, which host no
+	// per-session background/shell state. An empty id means the Agent creates no Manager
+	// (and would refuse a session-dependent tool outright), so there is nothing to leak
+	// or tear down — avoiding an end-session round-trip per probe.
 	return newest.sess.Call(ctx, tool, input, &remoteexec.WireToolCtx{WorkingDir: "enrich"}, nil)
 }
 

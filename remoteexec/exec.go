@@ -3,10 +3,12 @@ package remoteexec
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/Autumn-27/norma/permission"
 	actool "github.com/Autumn-27/norma/tool"
@@ -49,6 +51,16 @@ func (r *remoteTool) CheckPermissions(ctx context.Context, in json.RawMessage, p
 
 func (r *remoteTool) Call(ctx context.Context, in json.RawMessage, tc *actool.ToolContext) (actool.Result, error) {
 	wtc := toWireToolCtx(tc)
+	// Stamp the execution-session id bound to ctx so the Agent keys this call's
+	// background/shell Manager per session (isolation + teardown). This is the single
+	// choke point every remote tool call flows through, so stamping here covers Bash,
+	// WebFetch, Monitor, Task* and shell_* uniformly.
+	if sid := ExecSessionFrom(ctx); sid != "" {
+		if wtc == nil {
+			wtc = &WireToolCtx{}
+		}
+		wtc.SessionID = sid
+	}
 	var onProgress func(string)
 	if tc != nil && tc.Emit != nil {
 		onProgress = func(msg string) { tc.Emit(actool.ProgressInfo{Message: msg}) }
@@ -100,11 +112,41 @@ type Executor struct {
 	// every Bash subprocess. It is built on the Agent from the Agent-local recording
 	// proxy; Management never supplies it, so no control-plane secret can leak in.
 	bashEnv []string
-	// tasks is the background-task + interactive-shell Manager, shared across every call
-	// on this Agent so that, e.g., shell_open on one call and shell_read on the next hit
-	// the same PTY session. nil when background hosting was not enabled (tests / all-in-
-	// one, where the SDK session's own Manager is used). Set via EnableBackgroundTasks.
-	tasks *actool.Manager
+
+	// Background-task + interactive-shell hosting. When enabled, each execution session
+	// (keyed by WireToolCtx.SessionID) gets its OWN Manager, so one session's background
+	// processes / live PTYs are invisible and un-killable from another, and are torn down
+	// when that session ends — never shared across sessions (보안 리뷰 F2/F3). bgBaseID
+	// prefixes each session Manager's work-dir name. nil map / !bgEnabled = no hosting
+	// (tests / all-in-one, where the SDK session's own Manager is used).
+	bgEnabled bool
+	bgBaseID  string
+	mu        sync.Mutex
+	sessions  map[string]*execSession
+}
+
+// sessState is an execution session's lifecycle. Teardown is a two-step
+// active→terminating→terminated transition so a late call cannot slip in after cleanup
+// began, and a terminated id can never recreate a Manager (보안 리뷰 F3).
+type sessState int
+
+const (
+	sessActive sessState = iota
+	sessTerminating
+	sessTerminated
+)
+
+// execSession is one execution session's hosted state on the Agent. mgr is created
+// lazily — only when a session-dependent tool actually runs — but ctx/gate exist for
+// every session so even stateless calls (Bash) are bound to the session scope and get
+// cancelled when it ends or the connection drops. gate is RLocked for a call's duration
+// and write-Locked during teardown, so Cleanup never races a concurrent Spawn.
+type execSession struct {
+	mgr    *actool.Manager
+	state  sessState
+	gate   sync.RWMutex
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // NewExecutor builds an Executor over the given tools. sandboxRoot is created on
@@ -114,28 +156,154 @@ func NewExecutor(tools []actool.CoreTool, sandboxRoot string, bashEnv []string) 
 	for _, t := range tools {
 		m[t.Name()] = t
 	}
-	return &Executor{tools: m, sandboxRoot: sandboxRoot, bashEnv: bashEnv}
+	return &Executor{tools: m, sandboxRoot: sandboxRoot, bashEnv: bashEnv, sessions: map[string]*execSession{}}
 }
 
-// EnableBackgroundTasks gives the Executor a background-task + interactive-shell Manager
-// (tc.Tasks) so it can host norma's Monitor/Task* and shell_* tools — both keep their
-// per-session state (background processes, live PTYs) on the Manager inside the sandbox.
-// Call once on the Agent after NewExecutor; sessionID names the Manager's work dir.
-func (e *Executor) EnableBackgroundTasks(sessionID string) error {
-	mgr, err := actool.NewManager(sessionID)
-	if err != nil {
-		return err
-	}
-	e.tasks = mgr
+// EnableBackgroundTasks turns on per-session hosting of norma's Monitor/Task* and
+// shell_* tools. baseID prefixes each session Manager's work-dir name. Managers are
+// created lazily per execution session (see acquireSession), so this no longer creates
+// one eagerly and cannot fail; a per-session creation error surfaces at call time.
+func (e *Executor) EnableBackgroundTasks(baseID string) error {
+	e.bgEnabled = true
+	e.bgBaseID = baseID
 	return nil
 }
 
-// Cleanup tears down the background Manager (kills live processes/PTYs, removes its work
-// dir). Safe to call when background hosting was never enabled.
-func (e *Executor) Cleanup() {
-	if e.tasks != nil {
-		e.tasks.Cleanup()
+// Cleanup tears down every live execution session (kills processes/PTYs, removes work
+// dirs). Called on Agent process exit. Safe when hosting was never enabled.
+func (e *Executor) Cleanup() { e.EndAllSessions() }
+
+// EndSession tears down one execution session: refuse new calls, cancel in-flight ones,
+// wait for them to drain, then tear down its Manager. Idempotent (a repeat or late call
+// is a no-op), and a never-seen id is recorded as terminated so a call that arrives
+// after it can NOT recreate a Manager under it (보안 리뷰 F3).
+func (e *Executor) EndSession(sessionID string) {
+	if sessionID == "" {
+		return
 	}
+	e.mu.Lock()
+	es := e.sessions[sessionID]
+	if es == nil {
+		e.sessions[sessionID] = &execSession{state: sessTerminated}
+		e.mu.Unlock()
+		return
+	}
+	e.mu.Unlock()
+	e.terminate(es)
+}
+
+// EndAllSessions tears down every session this Executor holds. Called when the
+// control-plane connection drops (the Agent reuses one Executor across reconnects, and
+// at most one connection is active per ConnectAgentSide) and on process exit, so a
+// dropped connection's sessions and their in-flight calls do not linger.
+func (e *Executor) EndAllSessions() {
+	e.mu.Lock()
+	all := make([]*execSession, 0, len(e.sessions))
+	for _, es := range e.sessions {
+		all = append(all, es)
+	}
+	e.sessions = map[string]*execSession{}
+	e.mu.Unlock()
+	for _, es := range all {
+		e.terminate(es)
+	}
+}
+
+// terminate drives one session through terminating→terminated. It cancels the session
+// ctx first (so in-flight calls abort promptly), then takes the gate's write lock —
+// which blocks until every in-flight call (gate readers) has drained — before tearing
+// down the Manager, so a concurrent Spawn can never outlive Cleanup.
+func (e *Executor) terminate(es *execSession) {
+	e.mu.Lock()
+	if es.state != sessActive {
+		e.mu.Unlock()
+		return
+	}
+	es.state = sessTerminating
+	e.mu.Unlock()
+
+	if es.cancel != nil {
+		es.cancel()
+	}
+	es.gate.Lock()
+	if es.mgr != nil {
+		es.mgr.Cleanup()
+		es.mgr = nil
+	}
+	es.gate.Unlock()
+
+	e.mu.Lock()
+	es.state = sessTerminated
+	e.mu.Unlock()
+}
+
+// acquireSession returns the live execSession for id with its gate RLocked (the caller
+// must RUnlock), materializing its Manager when needMgr. It returns (nil, nil) when
+// there is no session scope (hosting off, or empty id — diagnostic/all-in-one calls),
+// and (nil, errExecSessionEnded) when the session is terminating/terminated so the
+// caller refuses the call rather than reviving it.
+func (e *Executor) acquireSession(id string, needMgr bool) (*execSession, error) {
+	if !e.bgEnabled || id == "" {
+		return nil, nil
+	}
+	e.mu.Lock()
+	es := e.sessions[id]
+	if es == nil {
+		es = &execSession{state: sessActive}
+		es.ctx, es.cancel = context.WithCancel(context.Background())
+		e.sessions[id] = es
+	}
+	if es.state != sessActive {
+		e.mu.Unlock()
+		return nil, errExecSessionEnded
+	}
+	if needMgr && es.mgr == nil {
+		mgr, err := actool.NewManager(e.bgBaseID + "-" + sanitizeID(id))
+		if err != nil {
+			e.mu.Unlock()
+			return nil, err
+		}
+		es.mgr = mgr
+	}
+	// RLock while holding e.mu is safe and never blocks here: terminate only write-Locks
+	// the gate AFTER setting state!=active under e.mu, and we only reach this on an active
+	// session, so no writer is holding or waiting on this gate.
+	es.gate.RLock()
+	e.mu.Unlock()
+	return es, nil
+}
+
+var errExecSessionEnded = errors.New("remoteexec: execution session has ended")
+
+// sessionToolSet names every tool whose state lives on the per-session Manager,
+// independent of the env gates that may exclude some at runtime. Constructing these
+// instances spawns nothing (they are read for their names only); used to decide when a
+// session's Manager must be materialized and to refuse these on a sessionless call.
+var sessionToolSet = buildSessionToolSet()
+
+func buildSessionToolSet() map[string]bool {
+	names := map[string]bool{}
+	for _, t := range []actool.CoreTool{newEgressMonitor(), actool.NewTaskOutput(), actool.NewTaskStop(), actool.NewTaskList()} {
+		names[t.Name()] = true
+	}
+	for _, t := range actool.ShellSessionTools() {
+		names[t.Name()] = true
+	}
+	return names
+}
+
+// sanitizeID keeps only filesystem-safe characters for a Manager work-dir name.
+func sanitizeID(s string) string {
+	b := make([]rune, 0, len(s))
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+			b = append(b, r)
+		default:
+			b = append(b, '_')
+		}
+	}
+	return string(b)
 }
 
 // ToolNames returns the executable tool names, for the hello announcement.
@@ -148,11 +316,51 @@ func (e *Executor) ToolNames() []string {
 }
 
 func (e *Executor) ServeCall(ctx context.Context, name string, input json.RawMessage, wtc *WireToolCtx, progress func(string)) (*WireResult, error) {
+	sid := ""
+	if wtc != nil {
+		sid = wtc.SessionID
+	}
+	// Reserved control call: tear down one execution session's hosted state. Handled
+	// before tool-registry lookup, so it is ready the moment the dispatcher is wired
+	// (before any call is served). Returning a Result is what confirms teardown to the
+	// caller's EndExecSession (not merely that it was enqueued).
+	if name == toolExecSessionEnd {
+		e.EndSession(sid)
+		return &WireResult{}, nil
+	}
+
 	t := e.tools[name]
 	if t == nil {
 		return &WireResult{Content: nil, IsError: true}, errNoSuchTool(name)
 	}
-	tc := &actool.ToolContext{Env: e.bashEnv, Tasks: e.tasks}
+
+	needMgr := sessionToolSet[name]
+	// A session-dependent tool needs a live execution session; refuse it (never share a
+	// Manager, never run sessionless) when hosting is off or no id was supplied.
+	if needMgr && (!e.bgEnabled || sid == "") {
+		return toWireResult(actool.Errorf("该工具需要一个执行会话（未提供会话标识）；本次调用被拒绝。")), nil
+	}
+
+	es, err := e.acquireSession(sid, needMgr)
+	if err != nil {
+		// Session is terminating/terminated, or its Manager could not be created. Refuse
+		// without reviving it — the model sees a tool error, not a shared/stale Manager.
+		return toWireResult(actool.Errorf("该执行会话已结束或不可用（" + err.Error() + "）；本次调用被拒绝。")), nil
+	}
+
+	tc := &actool.ToolContext{Env: e.bashEnv}
+	if es != nil {
+		defer es.gate.RUnlock()
+		tc.Tasks = es.mgr // nil for a stateless tool that never materialized one
+		// Bind this call to the session scope so EndSession / a dropped connection can
+		// cancel it in flight, while still honoring the per-call cancel (peer KindCancel).
+		callCtx, cancel := context.WithCancel(ctx)
+		stop := context.AfterFunc(es.ctx, cancel)
+		defer stop()
+		defer cancel()
+		ctx = callCtx
+	}
+
 	if wtc != nil {
 		tc.ToolUseID = wtc.ToolUseID
 		tc.MaxOutputChars = wtc.MaxOutputChars

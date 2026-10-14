@@ -114,6 +114,13 @@ type WireToolCtx struct {
 	ToolUseID      string `json:"tool_use_id,omitempty"`
 	MaxOutputChars int    `json:"max_output_chars,omitempty"`
 	OutputDir      string `json:"output_dir,omitempty"`
+	// SessionID names the execution session this call belongs to — a value unique to
+	// each control-plane agentcore session (see execsession.go), NOT a reused transcript
+	// id. The Agent keys the background-task / interactive-shell Manager by it so state
+	// (background processes, live PTYs) is isolated per execution session and torn down
+	// when that session ends. Empty on diagnostic/enrich calls that host no such state;
+	// a session-dependent tool with an empty id is refused on the Agent, never shared.
+	SessionID string `json:"session_id,omitempty"`
 }
 
 // WireResult is the serializable projection of norma's tool.Result.
