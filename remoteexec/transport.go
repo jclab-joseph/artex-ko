@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net"
+	"sync/atomic"
 	"time"
 )
 
@@ -72,7 +73,7 @@ func ConnectAgentSide(ctx context.Context, bundle *Bundle, exec *Executor) (*Ses
 			return nil, err
 		}
 		defer ln.Close()
-		conn, err := acceptOne(ctx, ln)
+		conn, err := acceptAuthenticated(ctx, ln)
 		if err != nil {
 			return nil, err
 		}
@@ -187,20 +188,54 @@ func tlsDial(ctx context.Context, addr string, cfg *tls.Config) (net.Conn, error
 	return conn, nil
 }
 
-func acceptOne(ctx context.Context, ln net.Listener) (net.Conn, error) {
-	type res struct {
-		conn net.Conn
-		err  error
-	}
-	ch := make(chan res, 1)
+// handshakeTimeout bounds a single accepted connection's TLS handshake on the listening
+// Agent, so a peer that connects but never completes (or never starts) the handshake is
+// dropped instead of occupying the Agent.
+const handshakeTimeout = 10 * time.Second
+
+// acceptAuthenticated returns the first accepted connection that COMPLETES the TLS
+// handshake within handshakeTimeout. A listening Agent (ModeMgmtDials) otherwise treated
+// a raw TCP peer as its session the moment it connected — the handshake is lazy, so a
+// peer that sent nothing left the Agent "connected" and, because the listener is closed
+// after one accept, blocked the real Management from ever connecting (보안 리뷰: 미인증
+// TCP 연결 하나가 Agent 를 점유). Connections are accepted continuously and handshaked
+// concurrently, so a stalled peer cannot delay a legitimate one; the first to authenticate
+// wins and the listener is closed, dropping the rest.
+func acceptAuthenticated(ctx context.Context, ln net.Listener) (net.Conn, error) {
+	winner := make(chan *tls.Conn, 1)
+	var won atomic.Bool
 	go func() {
-		c, err := ln.Accept()
-		ch <- res{c, err}
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return // listener closed (a winner was chosen, or ctx cancelled)
+			}
+			tc, ok := conn.(*tls.Conn)
+			if !ok {
+				_ = conn.Close()
+				continue
+			}
+			go func() {
+				hctx, cancel := context.WithTimeout(ctx, handshakeTimeout)
+				defer cancel()
+				if err := tc.HandshakeContext(hctx); err != nil {
+					_ = tc.Close()
+					return
+				}
+				if won.CompareAndSwap(false, true) {
+					winner <- tc
+					_ = ln.Close() // stop accepting; unblocks the Accept loop above
+				} else {
+					_ = tc.Close() // a peer already won
+				}
+			}()
+		}
 	}()
 	select {
-	case r := <-ch:
-		return r.conn, r.err
+	case tc := <-winner:
+		return tc, nil
 	case <-ctx.Done():
+		_ = ln.Close()
 		return nil, ctx.Err()
 	}
 }

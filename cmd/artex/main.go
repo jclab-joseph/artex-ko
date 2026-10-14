@@ -123,6 +123,13 @@ func run() int {
 	)
 	flag.Parse()
 
+	// Fail closed on a misconfigured execution policy: an unrecognized ARTEX_AGENT_OFFLOAD
+	// value must not silently disable the sandbox (보안 리뷰).
+	if err := server.ValidateOffloadEnv(); err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		return 2
+	}
+
 	// hand the build version to the server package so GET /api/health can report it
 	// to the frontend top bar.
 	server.BuildVersion = version

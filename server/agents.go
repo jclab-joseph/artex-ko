@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -63,6 +64,24 @@ func strictOffload() bool {
 
 // offloadMode is the resolved execution policy.
 func (s *Server) offloadMode() string { return resolvedOffloadMode() }
+
+// ValidateOffloadEnv rejects a non-empty but unrecognized ARTEX_AGENT_OFFLOAD value at
+// startup. The isolation guarantee holds only under require/pinned; silently treating a
+// typo (e.g. "requires", "true") as "off" would disable the sandbox with no signal — a
+// security footgun. The CLI calls this before serving and refuses to start on a bad value
+// (보안 리뷰: 잘못된 설정값을 off 로 처리). Unset is fine — "off" is the documented default.
+func ValidateOffloadEnv() error {
+	raw := os.Getenv(envAgentOffload)
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "off", "auto", "require", "pinned":
+		return nil
+	default:
+		return fmt.Errorf("%s=%q 는 올바르지 않습니다(off|auto|require|pinned 중 하나여야 합니다). 보안상 잘못된 값을 off(분리 비활성)로 처리하지 않고 기동을 거부합니다", envAgentOffload, raw)
+	}
+}
 
 // initAgentControl builds the agent-control manager, starts the inbound listener when
 // configured, and wires the engine's execution-backend resolver. Failure is non-fatal:

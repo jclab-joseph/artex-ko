@@ -136,6 +136,12 @@ func runScript(ctx context.Context, interp, key, code string, params map[string]
 	}
 	pj, _ := json.Marshal(params)
 	c.Stdin = bytes.NewReader(pj)
+	// Run the script in its own process group and tear the whole group down when the call
+	// returns (normally, on timeout, or on cancellation), so a child it detaches — a
+	// scanner spawned via subprocess.Popen / `&` / nohup — cannot keep running (and keep
+	// writing / egressing) after this call ends (보안 리뷰: 세션 종료 후 자식 프로세스 잔존).
+	setProcGroup(c)
+	defer killProcGroup(c)
 	out, err := c.CombinedOutput()
 	body := string(out)
 	if runCtx.Err() == context.DeadlineExceeded {

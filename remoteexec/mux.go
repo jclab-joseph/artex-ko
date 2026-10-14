@@ -318,9 +318,19 @@ func (s *Session) closeWith(err error) {
 		s.closeErr = err
 		pending := s.pending
 		s.pending = map[string]*pendingCall{}
+		inbound := s.inbound
+		s.inbound = map[string]context.CancelFunc{}
 		s.mu.Unlock()
 		close(s.done)
 		_ = s.conn.Close()
+		// Cancel every in-flight inbound call so a tool still running on this peer is
+		// aborted when the connection drops — including a call carrying NO execution
+		// session id (e.g. a sessionless ExecAny HTTP request), which per-session teardown
+		// does not reach. Binds all inbound calls to the connection's lifetime (보안 리뷰:
+		// 연결 종료가 세션 ID 없는 실행을 취소하지 않음).
+		for _, cancel := range inbound {
+			cancel()
+		}
 		// Fail every outstanding call so callers unblock.
 		for _, pc := range pending {
 			select {

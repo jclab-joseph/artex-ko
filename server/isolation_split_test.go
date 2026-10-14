@@ -80,6 +80,23 @@ func TestFinalPlannerRoundBindsExecBackend(t *testing.T) {
 	}
 }
 
+// Config hardening: an unrecognized ARTEX_AGENT_OFFLOAD value is a startup error, never
+// silently treated as "off" (which would disable the sandbox with no signal). (DB-free.)
+func TestValidateOffloadEnvRejectsInvalid(t *testing.T) {
+	for _, v := range []string{"", "off", "auto", "require", "pinned", "REQUIRE", " pinned "} {
+		t.Setenv(envAgentOffload, v)
+		if err := ValidateOffloadEnv(); err != nil {
+			t.Fatalf("%q should be a valid offload value: %v", v, err)
+		}
+	}
+	for _, v := range []string{"requires", "on", "true", "1", "sandbox", "require-pinned"} {
+		t.Setenv(envAgentOffload, v)
+		if err := ValidateOffloadEnv(); err == nil {
+			t.Fatalf("%q should be rejected as a startup error, not treated as off", v)
+		}
+	}
+}
+
 // F2: under a strict posture a non-agent-hosted MCP must not be connected on the control
 // plane — the tool-assembly seam marks it handled (so it is never locally connected), and
 // discovery classifies it as blocked. (DB-free.)
