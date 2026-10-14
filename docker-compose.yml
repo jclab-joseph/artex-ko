@@ -39,6 +39,16 @@ services:
       # 서버 쪽 기본 출력 언어(ko·en·zh·es). 비우면 한국어입니다. 에이전트 출력·오류 메시지는 설정 화면의
       # "표시 언어"가 우선하고, 서버 콘솔 로그는 이 값만 따릅니다.
       ARTEX_LANG: ${ARTEX_LANG:-}
+      # 실행 플레인 분리(Management ↔ 샌드박스 Agent) 정책. off(기본)=단일 프로세스(모든 도구가
+      # 여기서 실행); auto=Agent 있으면 오프로드·없으면 로컬 폴백; require=위험 작업은 반드시 샌드박스
+      # Agent 에서만(Agent 없으면 fail-closed); pinned=작업마다 지정한 Agent 에서만. 격리 보장은
+      # require/pinned 에서만 성립합니다. 잘못된 값은 기동을 거부합니다(off 로 묵살하지 않음).
+      # 분리 배포 시: 이 값을 require 로 두고, 별도 샌드박스에서 artex-agent 를 실행한 뒤
+      # `artex issue-agent` 로 발급한 번들로 연결하세요(연결 정보 생성만 artex 가 하고, 샌드박스
+      # 자체는 사용자가 컨테이너/VM/방화벽으로 격리합니다). 예시는 e2e/docker-compose.yml 참고.
+      ARTEX_AGENT_OFFLOAD: ${ARTEX_AGENT_OFFLOAD:-off}
+      # 리버스(Management→Agent) 대신 Agent→Management 접속을 받을 주소(예: 0.0.0.0:8790). 비우면 비활성.
+      ARTEX_AGENT_LISTEN: ${ARTEX_AGENT_LISTEN:-}
     ports:
       # 기본값은 호스트의 127.0.0.1 에만 게시합니다. 다른 기기에서 직접 접속하려면 .env 에
       # ARTEX_BIND=0.0.0.0 을 두되, 그 전에 반드시 초기 설정(관리자 비밀번호)을 마치고
