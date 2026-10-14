@@ -41,6 +41,11 @@ const (
 	// announced tool metadata, never a control-plane connection). Surfaced to the user by
 	// pgRefreshMCP when they refresh an agent-hosted server with no Agent connected.
 	errMCPAgentHostedNoAgentFmt = "agent-hosted MCP %q: 연결된 샌드박스 Agent 가 없어 도구를 발견할 수 없습니다(Agent 연결 후 다시 시도하세요)"
+	// Strict offload (require/pinned) forbids connecting ANY non-agent-hosted MCP on the
+	// control plane: a stdio server is a local child process and an http/sse server is
+	// local egress — both the dangerous ops the split keeps off Management. Surfaced when
+	// the user refreshes such a server under a strict posture.
+	errMCPStrictNotHostedFmt = "MCP %q: 엄격 오프로드(require/pinned)에서는 Agent 호스팅이 아닌 MCP 를 제어 플레인에서 연결할 수 없습니다(해당 MCP 를 agent_hosted 로 설정하세요)"
 )
 
 // mcpConfigFromDB projects a stored MCP row into the db-free mcpconn.Config shared
@@ -74,27 +79,42 @@ func (s *Server) agentHostedMCPConfigs() []mcpconn.Config {
 	return out
 }
 
-// mcpHostedTools decides, for one MCP server, whether it is hosted by the sandbox
-// Agent (split mode) and if so returns the Management-side placeholder tools built
-// from the Agent's announced metadata. The second return reports "handled": when true
-// the caller must NOT connect the server locally (it runs in the sandbox), even if the
-// placeholder set is currently empty (no Agent connected yet). When false, the server
-// is a normal control-plane MCP and the caller connects it as before.
-func (s *Server) mcpHostedTools(m *db.MCPServer) ([]actool.CoreTool, bool) {
-	if m == nil || !m.AgentHosted || s.offloadMode() == "off" {
-		return nil, false
+// mcpDisposition classifies how one MCP server is handled under the current offload policy.
+type mcpDisposition int
+
+const (
+	mcpConnectLocal  mcpDisposition = iota // connect on the control plane (monolith / auto / non-strict)
+	mcpAgentHosted                         // runs in the sandbox Agent; use announced metas, never local
+	mcpBlockedStrict                       // strict posture + not agent-hosted: a local connection is forbidden
+)
+
+// dispositionOfMCP decides whether an MCP server runs in the sandbox Agent, is blocked,
+// or is connected locally. agent_hosted servers (in any non-off mode) run in the Agent.
+// Otherwise require/pinned forbid connecting ANY MCP on the control plane — a stdio
+// server spawns a local child process and an http/sse server is local egress, both the
+// dangerous ops the split keeps off Management — so a non-hosted MCP is BLOCKED there
+// rather than connected, and the isolation no longer depends on the per-MCP agent_hosted
+// checkbox being set (보안 리뷰: 엄격 모드에서도 MCP 로 로컬 명령 실행). off/auto keep the
+// pre-split local connect (auto's local path is its intended fallback).
+func (s *Server) dispositionOfMCP(m *db.MCPServer) mcpDisposition {
+	if m == nil {
+		return mcpConnectLocal
 	}
-	// Agent-hosted + offload on: this MCP runs INSIDE the sandbox. Report "handled"
-	// (hosted=true) even when no Agent control registry exists yet — control-plane
-	// init failed, or it is not ready — or when none has announced. "handled" is what
-	// stops the caller from connecting the server locally (discoverAndCacheMCP /
-	// assembly.go), which would spawn the stdio child or open the endpoint ON the
-	// control plane. The old `s.agents == nil → hosted=false` fell back to exactly that
-	// local connect on the init-failure path. With no registry there are no placeholder
-	// tools to offer: return (nil, true) so discovery reports "no Agent connected" and
-	// assembly injects nothing — fail closed, never local (보안 리뷰: init 실패 경로).
+	if m.AgentHosted && s.offloadMode() != "off" {
+		return mcpAgentHosted
+	}
+	if strictOffload() {
+		return mcpBlockedStrict
+	}
+	return mcpConnectLocal
+}
+
+// announcedHostedTools builds the Management-side placeholder tools for an agent-hosted
+// MCP from the connected Agents' announced metadata. Empty when no Agent is connected or
+// no control registry exists yet — the caller treats that as "hosted but unavailable".
+func (s *Server) announcedHostedTools(m *db.MCPServer) []actool.CoreTool {
 	if s.agents == nil {
-		return nil, true
+		return nil
 	}
 	metas := s.agents.AnnouncedMetas()
 	prefix := "mcp__" + m.Name + "__"
@@ -104,7 +124,24 @@ func (s *Server) mcpHostedTools(m *db.MCPServer) ([]actool.CoreTool, bool) {
 			out = append(out, remoteexec.CoreToolFromMeta(meta))
 		}
 	}
-	return out, true
+	return out
+}
+
+// mcpHostedTools reports, for the agent tool-assembly seam, whether an MCP server must
+// NOT be connected on the control plane (handled=true) and, when agent-hosted, the
+// placeholder tools from the Agent's announce. handled=true with no tools means either
+// agent-hosted-but-no-Agent or strict-mode-blocked: assembly injects nothing and skips
+// the local connect either way. handled=false → a normal control-plane MCP (connect as
+// before).
+func (s *Server) mcpHostedTools(m *db.MCPServer) ([]actool.CoreTool, bool) {
+	switch s.dispositionOfMCP(m) {
+	case mcpAgentHosted:
+		return s.announcedHostedTools(m), true
+	case mcpBlockedStrict:
+		return nil, true
+	default:
+		return nil, false
+	}
 }
 
 // connectMCP dials one MCP server per its transport. Callers must Close the client.
@@ -136,9 +173,14 @@ func connectMCP(ctx context.Context, m *db.MCPServer) (mcpClient, error) {
 func (s *Server) discoverAndCacheMCP(ctx context.Context, m *db.MCPServer) error {
 	// Agent-hosted servers run INSIDE the sandbox: never connect them on the control
 	// plane (that would spawn the stdio child / open the endpoint here — 보안 리뷰 F6).
-	// Discover from the Agent's announced tool metadata instead. This covers both startup
+	// Discover from the Agent's announced tool metadata instead. In strict offload a
+	// non-hosted MCP is likewise refused, never connected locally. This covers startup
 	// auto-discovery and manual refresh, which previously both called connectMCP locally.
-	if tools, hosted := s.mcpHostedTools(m); hosted {
+	switch s.dispositionOfMCP(m) {
+	case mcpBlockedStrict:
+		return fmt.Errorf(trMsg(errMCPStrictNotHostedFmt), m.Name)
+	case mcpAgentHosted:
+		tools := s.announcedHostedTools(m)
 		if len(tools) == 0 {
 			return fmt.Errorf(trMsg(errMCPAgentHostedNoAgentFmt), m.Name)
 		}

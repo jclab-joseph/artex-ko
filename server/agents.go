@@ -35,8 +35,11 @@ const (
 	envAgentOffload = "ARTEX_AGENT_OFFLOAD"
 )
 
-// offloadMode is the resolved execution policy.
-func (s *Server) offloadMode() string {
+// resolvedOffloadMode reads the execution policy from the environment. It is a package
+// function (not just a Server method) so construction-time code with no Server yet —
+// notably NewManager deciding whether to run the local recording proxy — resolves the
+// same policy. Unset or unrecognized = "off".
+func resolvedOffloadMode() string {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(envAgentOffload))) {
 	case "pinned":
 		return "pinned"
@@ -48,6 +51,18 @@ func (s *Server) offloadMode() string {
 		return "off"
 	}
 }
+
+// strictOffload reports whether the policy mandates a sandbox for all dangerous ops
+// (require/pinned). In these modes the control plane must never run a dangerous local
+// operation — no local tool exec, no local MCP connection, no local recording proxy —
+// regardless of per-item configuration; it fails closed instead.
+func strictOffload() bool {
+	m := resolvedOffloadMode()
+	return m == "require" || m == "pinned"
+}
+
+// offloadMode is the resolved execution policy.
+func (s *Server) offloadMode() string { return resolvedOffloadMode() }
 
 // initAgentControl builds the agent-control manager, starts the inbound listener when
 // configured, and wires the engine's execution-backend resolver. Failure is non-fatal:

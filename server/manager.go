@@ -385,6 +385,16 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 		log.Printf("[llmusage] create table: %v", err)
 	}
 	m := &Manager{dir: dir, pg: pg, assets: pg.Assets(), tasks: map[string]*Task{}, interceptor: intercept.New(pg)}
+	// Strict offload (require/pinned): the control plane must not run a local recording
+	// proxy — it would be an open forward proxy relaying target HTTP, a dangerous local
+	// egress the split exists to prevent. The sandbox Agent hosts its own recorder
+	// (--traffic). Enforce this in code so a deployment that leaves -proxy at its default
+	// is not silently left relaying; the documented `-proxy ""` is now a backstop, not the
+	// only guard (보안 리뷰: Management 기록 프록시가 실행 정책과 독립적으로 동작).
+	if proxyAddr != "" && strictOffload() {
+		log.Printf("[traffic] 기록 프록시 비활성화: 엄격 오프로드(%s)에서는 제어 플레인 프록시를 띄우지 않습니다(샌드박스 Agent 가 --traffic 로 호스팅)", resolvedOffloadMode())
+		proxyAddr = ""
+	}
 	if proxyAddr != "" {
 		tr, err := traffic.Open(filepath.Join(dir, "traffic"), proxyAddr)
 		if err != nil {
