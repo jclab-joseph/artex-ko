@@ -81,8 +81,20 @@ func (s *Server) agentHostedMCPConfigs() []mcpconn.Config {
 // placeholder set is currently empty (no Agent connected yet). When false, the server
 // is a normal control-plane MCP and the caller connects it as before.
 func (s *Server) mcpHostedTools(m *db.MCPServer) ([]actool.CoreTool, bool) {
-	if m == nil || !m.AgentHosted || s.offloadMode() == "off" || s.agents == nil {
+	if m == nil || !m.AgentHosted || s.offloadMode() == "off" {
 		return nil, false
+	}
+	// Agent-hosted + offload on: this MCP runs INSIDE the sandbox. Report "handled"
+	// (hosted=true) even when no Agent control registry exists yet — control-plane
+	// init failed, or it is not ready — or when none has announced. "handled" is what
+	// stops the caller from connecting the server locally (discoverAndCacheMCP /
+	// assembly.go), which would spawn the stdio child or open the endpoint ON the
+	// control plane. The old `s.agents == nil → hosted=false` fell back to exactly that
+	// local connect on the init-failure path. With no registry there are no placeholder
+	// tools to offer: return (nil, true) so discovery reports "no Agent connected" and
+	// assembly injects nothing — fail closed, never local (보안 리뷰: init 실패 경로).
+	if s.agents == nil {
+		return nil, true
 	}
 	metas := s.agents.AnnouncedMetas()
 	prefix := "mcp__" + m.Name + "__"
