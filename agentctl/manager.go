@@ -356,6 +356,21 @@ func (m *Manager) ExecAny(ctx context.Context, tool string, input json.RawMessag
 	return newest.sess.Call(ctx, tool, input, &remoteexec.WireToolCtx{WorkingDir: "enrich"}, nil)
 }
 
+// ExecOn runs one tool on a SPECIFIC connected Agent (no execution session — for stateless
+// read services such as evidence sync, which host no per-session state). Unlike ExecAny it
+// never falls back to another Agent: if agentID is not connected it errors. This keeps a
+// task's data (e.g. captured traffic evidence) sourced only from the sandbox that produced
+// it, so a multi-Agent / multi-tenant deployment (agent == tenant) can't cross tenants.
+func (m *Manager) ExecOn(ctx context.Context, agentID, tool string, input json.RawMessage) (*remoteexec.WireResult, error) {
+	m.mu.RLock()
+	a := m.agents[agentID]
+	m.mu.RUnlock()
+	if a == nil {
+		return nil, errors.New("agentctl: agent not connected: " + agentID)
+	}
+	return a.sess.Call(ctx, tool, input, &remoteexec.WireToolCtx{WorkingDir: "enrich"}, nil)
+}
+
 // List returns a snapshot of live agents (no secrets).
 func (m *Manager) List() []Agent {
 	m.mu.RLock()

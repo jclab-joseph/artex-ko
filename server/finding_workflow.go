@@ -181,7 +181,7 @@ func (s *Server) toolBindFindingTraffic() actool.CoreTool {
 			if len(args.Refs) == 0 {
 				return actool.Errorf("补绑需要至少一条已核实的 traffic_refs；无流量无需调用此工具"), nil
 			}
-			list, err := s.evidenceStore().Bind(ctx, id, args.Refs)
+			list, err := s.evidenceStoreForTask(s.evidenceTaskKey(id)).Bind(ctx, id, args.Refs)
 			if err != nil {
 				return actool.Errorf(err.Error()), nil
 			}
