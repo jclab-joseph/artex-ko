@@ -182,6 +182,27 @@ assert ('Output file' in out) or ('monitor' in out.lower()), 'Monitor did not st
 print('assertion passed: Monitor spawned a background task IN the sandbox')
 " || fail "agent-hosted Monitor failed"
 
+# 7b-exec-isolation. Per-execution-session isolation (보안 리뷰 F2/F3): each /exec call
+#   runs under its OWN execution session that is torn down when the call ends, so a
+#   background task started in one call is invisible to — and already reclaimed for —
+#   the next. Start a long Monitor, then TaskList in a SEPARATE call and assert it sees
+#   no tasks: one session cannot enumerate (hence cannot TaskStop) another's processes,
+#   and state does not leak or linger across sessions.
+say "Asserting per-session isolation + teardown (Monitor in one session, TaskList in another)"
+curl -fsS "${AUTH[@]}" -X POST "$MGMT_URL/api/exec-agents/$AGENT_ID/exec" \
+  -H 'Content-Type: application/json' \
+  -d '{"tool":"Monitor","input":{"command":"sleep 30","description":"iso-probe"}}' >/dev/null
+ISO="$(curl -fsS "${AUTH[@]}" -X POST "$MGMT_URL/api/exec-agents/$AGENT_ID/exec" \
+  -H 'Content-Type: application/json' -d '{"tool":"TaskList","input":{}}')"
+echo "$ISO" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+assert d.get('is_error') is not True, 'TaskList errored: %r' % d
+out = d.get('output','')
+assert 'No background tasks' in out, 'another session saw/retained tasks (isolation/teardown broken): %r' % out
+print('assertion passed: a background task in one execution session is isolated + reclaimed (invisible to another)')
+" || fail "per-session isolation/teardown assertion failed"
+
 # 7b-traffic. Prove the recording store is HOSTED IN THE SANDBOX: make the Agent fetch
 #   a target through its own hosted recorder (Bash+curl egress → recorder → target),
 #   then drive traffic_search from Management THROUGH the Agent and assert the captured
@@ -216,6 +237,12 @@ sys.exit(0 if (d.get('is_error') is not True and 'target' in d.get('output','') 
   [[ $i == 15 ]] && { echo "$TS" | python3 -m json.tool; fail "traffic_search never returned the captured exchange"; }
   sleep 1
 done
+# (Monitor egress-through-proxy — 보안 리뷰 F4 — is covered deterministically by the
+#  remoteexec unit test TestMonitorInheritsEgressEnv: the diagnostic /exec path gives each
+#  call its own execution session and tears it down the instant the call returns, which
+#  kills a Monitor-spawned background request before it completes, so a captured exchange
+#  from it cannot be observed over this endpoint. Bash egress-through-proxy is asserted
+#  above; the unit test asserts Monitor inherits the same egress env.)
 
 # 7b-evidence. Prove finding-bind evidence SYNC: the control plane pulls the cited
 #   exchange bytes out of the sandbox via the Agent's __artex_traffic_evidence service
