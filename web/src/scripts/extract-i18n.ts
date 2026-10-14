@@ -5,9 +5,9 @@
  *
  * `src/` 아래 모든 `.ts`/`.tsx` 를 TypeScript AST 로 파싱해, 사용자에게 노출되는
  * 하드코딩 중국어 문자열만 뽑아낸다. 추출 대상은 세 종류다.
- *   1) 문자열 리터럴            예) title: "仪表盘"
- *   2) 템플릿 리터럴            예) `已删除 ${n} 个对话` → "已删除 {var0} 个对话"
- *   3) JSX 텍스트 노드          예) <span>故障转移</span>
+ *   1) 문자열 리터럴            예) title: "Dashboard"
+ *   2) 템플릿 리터럴            예) `Deleted ${n} conversations` → "Deleted {var0} conversations"
+ *   3) JSX 텍스트 노드          예) <span>Failover</span>
  * 주석(`//`, `/* *\/`)은 AST 노드가 아니므로 저절로 제외된다. 선행·후행 주석에
  * 들어 있는 중국어는 번역 대상이 아니다(BRIEF: 주석 번역은 우선순위 최하).
  *

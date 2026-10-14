@@ -76,9 +76,9 @@ func (c *ChatAgent) SetGuard(g *guard.Guard) { c.guard = g }
 
 // chatWorkDirSpec returns a working-directory notice appended to every chat
 // agent's system prompt. Mirrors artifactSpec but without pentest-specific
-// wording ("payload", "抓响应体") that would be odd in a general assistant.
+// wording ("payload", "capture the response body") that would be odd in a general assistant.
 func chatWorkDirSpec(workDir string) string {
-	return "\n\n**文件输出规约**：需要写文件时，一律写到工作目录 " + workDir + "（这是默认 CWD，相对路径即落在这里，也可用该绝对路径）——不要写 /tmp 或其他绝对路径。"
+	return "\n\n**File output convention**: when you need to write a file, always write it to the working directory " + workDir + " (this is the default CWD, so relative paths land here; you may also use this absolute path) — do not write to /tmp or other absolute paths."
 }
 
 // chatSystem renders the DB-managed prompt body for agentKey. Custom agents have
@@ -134,13 +134,13 @@ func (c *ChatAgent) Chat(ctx context.Context, agentKey, sessionID, message strin
 		DeferredTools:   def.Deferred,
 		UnlockSet:       def.Unlock,
 		PermissionMode:  permission.ModeBypass,
-		EnableWebFetch:  !RemoteWebFetchActive(ctx), // 执行面分离时改用远程代理;否则走记录代理留痕+载入代理 CA
+		EnableWebFetch:  !RemoteWebFetchActive(ctx), // execution-plane split: use the remote proxy instead; otherwise go through the recording proxy (leaving a trail) and load the proxy CA
 		WebFetchProxy:   c.proxyAddr,
 		WebFetchCACert:  c.proxyCACert,
-		// 执行面分离时 백그라운드 매니저는 Agent 에만 → SDK 로컬 주입 차단, 원격 프록시로 대체.
+		// execution-plane split: the background manager lives only on the Agent → block local SDK injection, replace with the remote proxy.
 		DisableBackgroundTasks: RemoteExecActive(ctx),
-		// 联网搜索(可选)。ddgs 无需 key；brave-free 需 BraveKey；tavily 需 TavilyKey。
-		// WebSearchProxy 是独立出口代理(http/https/socks5)，与记录流量的 MITM 代理无关；空则直连。
+		// web search (optional). ddgs needs no key; brave-free needs BraveKey; tavily needs TavilyKey.
+		// WebSearchProxy is a standalone egress proxy (http/https/socks5), unrelated to the MITM proxy that records traffic; empty means a direct connection.
 		EnableWebSearch:       ws.Enabled,
 		WebSearchBackend:      ws.Backend,
 		BraveSearchAPIKey:     ws.BraveKey,
@@ -149,20 +149,20 @@ func (c *ChatAgent) Chat(ctx context.Context, agentKey, sessionID, message strin
 		DeepSeekSearchAPIKey:  ws.DeepSeekAPIKey,
 		DeepSeekSearchModel:   ws.DeepSeekModel,
 		WebSearchProxy:        ws.Proxy,
-		BashEnv:               ExecBashEnv(ctx, c.proxyAddr, c.proxyCACert), // 执行面分离时由 Agent 本地注入出口环境
+		BashEnv:               ExecBashEnv(ctx, c.proxyAddr, c.proxyCACert), // execution-plane split: the Agent injects the egress environment locally
 		WorkingDir:            sessionWorkDir,
 		MaxTurns:              maxTurns,
 		MaxDuration:           maxDuration,
 		Compaction:            compactionConfig(c.window),
 		Todos:                 actool.NewTodoStore(),
 		// large tool output spills to cmd-output/ under the session dir.
-		// 截断上限用 SDK 默认(tool.Capture 的 30000 字符)。
+		// truncation cap uses the SDK default (tool.Capture's 30000 characters).
 		ToolOutputDir: filepath.Join(sessionWorkDir, "cmd-output"),
-		// 命中预算(步数)→ SDK 跑收尾:输出一句总结。Prompt 与收尾轮数按本 agent key 后台可编辑
-		// (自定义 agent 各自一份;留空/0 用通用默认:10 轮)。
+		// hitting the budget (step count) → the SDK runs settling: output a one-sentence summary. The prompt and settling turn count are editable in the backend per agent key
+		// (each custom agent has its own; empty/0 uses the common default: 10 turns).
 		Settlement:   wrapupSettlement(agentKey, nil),
-		NonStreaming: c.nonStreaming(), // 该 profile 选非流式时走 Provider.Complete
-		MaxTokens:    c.maxTokens(),    // 0 = 不发上限,由服务端默认值决定
+		NonStreaming: c.nonStreaming(), // this profile goes through Provider.Complete when non-streaming is selected
+		MaxTokens:    c.maxTokens(),    // 0 = send no limit; the server default decides
 	}
 	if c.guard != nil {
 		opts.Hooks = c.guard.Hooks()
@@ -171,7 +171,7 @@ func (c *ChatAgent) Chat(ctx context.Context, agentKey, sessionID, message strin
 		opts.Transcript = c.tx
 		opts.SessionID = sessionID
 	}
-	// 实验功能:开启后由 noa 接管上下文压缩(归档集中在 <workDir>/noa/<SessionID> 下,持久)。
+	// experimental feature: when enabled, noa takes over context compaction (archives are consolidated under <workDir>/noa/<SessionID>, persistent).
 	enableNoa(&opts, c.noaEnabledFn, c.workDir, "chat-"+sessionID, noaWarn("chat-"+sessionID))
 	ctx = attachSideCapture(ctx, &opts)
 	ctx, endExec := beginExecSession(ctx) // split mode: isolate + tear down this turn's Agent-hosted state

@@ -70,7 +70,7 @@ func TestDecodeConversationRequestTooLargeLocalized(t *testing.T) {
 
 // TestConversationDefaultTitlesLocalized 는 대화 기본 제목 두 상수(F8)가 한국어이고 서로
 // 구별됨을 단언한다. convDefaultTitle 은 생성 기본값이자 자동 제목 분기의 센티넬이므로,
-// 중국어 "新对话" 로 되돌아가면 사용자가 대화 목록·삭제 다이얼로그에서 중국어를 보게 된다.
+// 중국어 기본값으로 되돌아가면 사용자가 대화 목록·삭제 다이얼로그에서 중국어를 보게 된다.
 func TestConversationDefaultTitlesLocalized(t *testing.T) {
 	assertKoreanError(t, "default_title", convDefaultTitle)
 	assertKoreanError(t, "attachment_title", convAttachmentTitle)

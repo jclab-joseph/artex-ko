@@ -15,7 +15,7 @@ import (
 // fmt.Errorf 2곳, ② F34: writeErr 를 거치지 않는 사용자 노출 5곳(chatUnavailableReason
 // 의 return 3종 + testLLM·웹 검색 프로브의 writeJSON error 2종), ③ F34(d): 규칙 모드
 // 채팅 fallbackChat 의 응답 3종(확인 2종 + 현황 요약)과 한국어 트리거 별칭(의도/힌트) 인식
-// 이다. 에이전트에 전달되는 프롬프트·도구 설명·seed 의도 요약·기본 제목(未命名任务)·로그는
+// 이다. 에이전트에 전달되는 프롬프트·도구 설명·seed 의도 요약·기본 제목(Unnamed task)·로그는
 // 원문 보존이라 이 테스트의 대상이 아니다.
 
 // TestServerErrorConstantsLocalized 는 응답 상수 전부가 한국어임을 단언한다. 형식 문자열
@@ -277,8 +277,8 @@ func TestFallbackCommandParsing(t *testing.T) {
 	}{
 		{"korean-intent", "의도 SQLi 주입점 먼저 확인", "intent", "SQLi 주입점 먼저 확인"},
 		{"korean-hint", "힌트 로그인 폼부터 보라", "hint", "로그인 폼부터 보라"},
-		{"chinese-intent", "意图 扫描端口", "intent", "扫描端口"}, // 하위 호환 보존
-		{"chinese-hint", "提示 看登录", "hint", "看登录"},       // 하위 호환 보존
+		{"chinese-intent", "意图 scan ports", "intent", "scan ports"}, // 하위 호환 보존
+		{"chinese-hint", "提示 check login", "hint", "check login"},   // 하위 호환 보존
 		{"english-intent", "intent scan ports", "intent", "scan ports"},
 		{"english-hint", "hint try admin:admin", "hint", "try admin:admin"},
 		{"status-korean", "지금 상황 알려줘", "", "지금 상황 알려줘"},

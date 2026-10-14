@@ -101,7 +101,7 @@ func (m *Manager) loadOrInitPKI() error {
 		if err := writeSecret(m.caKeyPath(), ca.KeyPEM); err != nil {
 			return err
 		}
-		log.Printf("[agentctl] 신규 제어 플레인 CA 생성: %s", m.caCertPath())
+		log.Printf("[agentctl] created a new control-plane CA: %s", m.caCertPath())
 	}
 
 	mgmtCert, errMC := os.ReadFile(m.mgmtCertPath())
@@ -160,7 +160,7 @@ func (m *Manager) StartListener(ctx context.Context, addr string) error {
 		return err
 	}
 	m.listener = ln
-	log.Printf("[agentctl] Agent 접속 수신 대기: %s (agent-dials 모드)", ln.Addr())
+	log.Printf("[agentctl] listening for Agent connections: %s (agent-dials mode)", ln.Addr())
 	go func() {
 		<-ctx.Done()
 		ln.Close()
@@ -218,7 +218,7 @@ func (m *Manager) register(sess *remoteexec.Session, hello *remoteexec.Frame, mo
 	m.agents[a.ID] = a
 	delete(m.issued, a.ID)
 	m.mu.Unlock()
-	log.Printf("[agentctl] Agent 연결됨: id=%s mode=%s tools=%v", a.ID, mode, a.Tools)
+	log.Printf("[agentctl] Agent connected: id=%s mode=%s tools=%v", a.ID, mode, a.Tools)
 
 	// Reap the registry entry when the session ends.
 	go func() {
@@ -228,7 +228,7 @@ func (m *Manager) register(sess *remoteexec.Session, hello *remoteexec.Frame, mo
 			delete(m.agents, a.ID)
 		}
 		m.mu.Unlock()
-		log.Printf("[agentctl] Agent 연결 종료: id=%s (%v)", a.ID, sess.Err())
+		log.Printf("[agentctl] Agent disconnected: id=%s (%v)", a.ID, sess.Err())
 	}()
 	return a
 }

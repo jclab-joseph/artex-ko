@@ -24,12 +24,12 @@ import (
 	actool "github.com/Autumn-27/norma/tool"
 )
 
-// 本文件实现自定义工具执行器(docs/自定义工具设计.md)。system=false 的 tools 行按
-// kind 分派:command(渲染命令→复用 Bash 底层 run)、script(仅 Python;写临时文件、
-// stdin=参数 JSON + env TOOL_*、用配置的解释器)、http(原生请求+可设代理)。这些工具
-// 像流量/编排工具一样 seed 不需要(它们本就在 tools 表),经 hostTools 注入、按绑定过滤。
+// This file implements the custom-tool executor (docs/custom-tool-design.md). tools rows with system=false are
+// dispatched by kind: command (render the command → reuse Bash's underlying run), script (Python only; writes a temp file,
+// stdin=the args JSON + env TOOL_*, using the configured interpreter), http (a native request + optional proxy). Like the
+// traffic/orchestration tools, these need no seeding (they are already in the tools table); they are injected via hostTools and filtered by binding.
 
-// ---------- 自定义工具 CRUD ----------
+// ---------- custom-tool CRUD ----------
 
 type customToolReq struct {
 	Key         string          `json:"key"`
@@ -42,7 +42,7 @@ type customToolReq struct {
 	Deferred    bool            `json:"deferred"`
 }
 
-var reToolKey = reAgentKey // 同 agent key 规则:小写字母开头 + 小写字母/数字/下划线
+var reToolKey = reAgentKey // same rule as the agent key: starts with a lowercase letter + lowercase letters/digits/underscores
 
 // 사용자 지정 도구 CRUD·시험 실행 엔드포인트가 writeErr 로 사용자에게 돌려주는 검증
 // 오류 응답을 한국어로 고정한다. 에이전트가 읽는 도구 실행 결과(actool.Errorf)와 도구
@@ -198,7 +198,7 @@ func (s *Server) pgTestCustomTool(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"output": res.Flatten(), "is_error": res.IsError})
 }
 
-// ---------- Python 解释器(检测 + 入库 + 覆盖) ----------
+// ---------- Python interpreter (detect + store + override) ----------
 
 const settingPythonInterp = "python_interpreter"
 
@@ -233,7 +233,7 @@ func (s *Server) seedPythonInterpreter() {
 	}
 }
 
-// ---------- exec 规格 ----------
+// ---------- exec spec ----------
 
 type commandExec struct {
 	Command   string `json:"command"`
@@ -260,7 +260,7 @@ func timeoutOr(ms, def int) time.Duration {
 	return time.Duration(ms) * time.Millisecond
 }
 
-// ---------- 通用工具构造 ----------
+// ---------- generic tool construction ----------
 
 // customTools builds CoreTools for every user-defined (system=false) tool row.
 // shell-kind tools are environment hints only — they surface in the Bash tool
@@ -281,7 +281,7 @@ func (s *Server) customTools() ([]actool.CoreTool, error) {
 }
 
 // buildCustomTool turns one custom-tool row into a CoreTool. Empty schema → a thin
-// {args:string} (薄壳工具), so command/http templates can use {args}.
+// {args:string} (thin-shell tool), so command/http templates can use {args}.
 func (s *Server) buildCustomTool(t *db.Tool) actool.CoreTool {
 	schema := ensureSchema(t.Schema)
 	key, kind, execRaw := t.Key, t.Kind, t.Exec
@@ -301,7 +301,7 @@ func (s *Server) buildCustomTool(t *db.Tool) actool.CoreTool {
 		case "http":
 			return s.runHTTPTool(ctx, execRaw, params, tc)
 		default:
-			return actool.Errorf("未知自定义工具类型: " + kind), nil
+			return actool.Errorf("unknown custom tool type: " + kind), nil
 		}
 	}
 	return actool.Build(actool.Spec{
@@ -341,44 +341,44 @@ func ensureSchema(raw json.RawMessage) map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"args": map[string]any{"type": "string", "description": "命令/参数(自由文本)"},
+			"args": map[string]any{"type": "string", "description": "command/arguments (free text)"},
 		},
 	}
 }
 
-// ---------- command:渲染命令 → 复用 Bash 底层 run ----------
+// ---------- command: render the command → reuse Bash's underlying run ----------
 
 func (s *Server) runCommandTool(ctx context.Context, execRaw json.RawMessage, params map[string]any, tc *actool.ToolContext) (actool.Result, error) {
 	var spec commandExec
 	_ = json.Unmarshal(execRaw, &spec)
 	if strings.TrimSpace(spec.Command) == "" {
-		return actool.Errorf("command 为空"), nil
+		return actool.Errorf("command is empty"), nil
 	}
 	cmd := renderTemplate(spec.Command, params, shellQuote)
-	// 复用 Bash 也在用的底层 run(经 Bash CoreTool.Call):自动继承安全 floor/超时/
-	// 代理 env/输出溢出。工具与 Bash 平级、共用底层,不经过 Bash 这个工具让模型调。
+	// Reuse the same underlying run Bash uses (via Bash CoreTool.Call): automatically inherits the security floor/timeout/
+	// proxy env/output overflow. This tool is a peer of Bash sharing the same underlying run, not routed through the Bash tool for the model to call.
 	bashIn, _ := json.Marshal(map[string]any{"command": cmd})
 	if spec.TimeoutMs > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, timeoutOr(spec.TimeoutMs, 120000))
 		defer cancel()
 	}
-	// 执行面分离:命令类自定义工具的底层 Bash 也要在沙箱 Agent 里跑(任意 shell 命令是
-	// 最危险的面)。backend 把 Bash.Call 路由到 Agent;未绑定(单进程)时 LocalBackend
-	// 原样返回,行为不变。
+	// Execution-plane split: the underlying Bash of command-type custom tools must also run in the sandbox Agent (an arbitrary shell command is
+	// the most dangerous surface). The backend routes Bash.Call to the Agent; when not bound (single process) LocalBackend
+	// returns as-is, behavior unchanged.
 	bash := remoteexec.BackendFrom(ctx).Wrap(actool.NewBash())
 	return bash.Call(ctx, bashIn, tc)
 }
 
-// ---------- script(仅 Python):临时文件 + stdin JSON + env ----------
+// ---------- script (Python only): temp file + stdin JSON + env ----------
 
 func (s *Server) runScriptTool(ctx context.Context, key string, execRaw json.RawMessage, params map[string]any, tc *actool.ToolContext) (actool.Result, error) {
 	var spec scriptExec
 	_ = json.Unmarshal(execRaw, &spec)
 	if strings.TrimSpace(spec.Code) == "" {
-		return actool.Errorf("script code 为空"), nil
+		return actool.Errorf("script code is empty"), nil
 	}
-	// 执行面分离: split 모드(IsRemote)면 스크립트 실행을 execsvc 로 넘긴다. Agent 가 이
+	// 실행 플레인 분리: split 모드(IsRemote)면 스크립트 실행을 execsvc 로 넘긴다. Agent 가 이
 	// 서비스를 announce 했으면 원격 실행(인터프리터 선호값만 전달; 실제 실행·탐색은 Agent),
 	// announce 안 했거나 미연결(fail-closed)이면 Wrap 이 차단한다 — 제어 플레인 로컬 실행
 	// 로 절대 폴백하지 않는다(보안 리뷰 F3). off/단일 프로세스(IsRemote=false)일 때만 아래
@@ -391,7 +391,7 @@ func (s *Server) runScriptTool(ctx context.Context, key string, execRaw json.Raw
 	}
 	interp := s.pythonInterpreter()
 	if interp == "" {
-		return actool.Errorf("未配置且未检测到 python 解释器(在系统配置里设置)"), nil
+		return actool.Errorf("no python interpreter configured or detected (set it in the system configuration)"), nil
 	}
 	workDir := s.m.dir
 	var sessionEnv []string
@@ -432,25 +432,25 @@ func execPython(ctx context.Context, interp, key, code string, params map[string
 	defer cancel()
 	c := exec.CommandContext(runCtx, interp, tmp)
 	c.Dir = workDir
-	c.Env = append(os.Environ(), sessionEnv...) // 会话代理 env
-	for k, v := range params {                  // 标量参数镜像成 TOOL_<NAME>
+	c.Env = append(os.Environ(), sessionEnv...) // session proxy env
+	for k, v := range params {                  // scalar params mirrored into TOOL_<NAME>
 		if sv, ok := scalarStr(v); ok {
 			c.Env = append(c.Env, "TOOL_"+strings.ToUpper(k)+"="+sv)
 		}
 	}
 	pj, _ := json.Marshal(params)
-	c.Stdin = bytes.NewReader(pj) // 参数 JSON 走 stdin
+	c.Stdin = bytes.NewReader(pj) // the args JSON goes through stdin
 	out, err := c.CombinedOutput()
 	body := string(out)
 	if runCtx.Err() == context.DeadlineExceeded {
-		body += "\n... [超时终止] ..."
+		body += "\n... [terminated on timeout] ..."
 	} else if err != nil {
 		body += "\n[exit: " + err.Error() + "]"
 	}
 	return body, nil
 }
 
-// ---------- http:原生请求 + 代理 ----------
+// ---------- http: native request + proxy ----------
 
 func (s *Server) runHTTPTool(ctx context.Context, execRaw json.RawMessage, params map[string]any, tc *actool.ToolContext) (actool.Result, error) {
 	var spec httpExec
@@ -461,9 +461,9 @@ func (s *Server) runHTTPTool(ctx context.Context, execRaw json.RawMessage, param
 	}
 	rawURL := renderTemplate(spec.URL, params, identity)
 	if strings.TrimSpace(rawURL) == "" {
-		return actool.Errorf("http url 为空"), nil
+		return actool.Errorf("http url is empty"), nil
 	}
-	// 执行面分离: split 모드(IsRemote)면 HTTP 요청을 execsvc 로 넘긴다 — announce 됐으면
+	// 실행 플레인 분리: split 모드(IsRemote)면 HTTP 요청을 execsvc 로 넘긴다 — announce 됐으면
 	// Agent 에서 전송, 아니면 Wrap 이 차단(로컬 폴백 없음, 보안 리뷰 F3). use_recording_proxy
 	// 는 Agent 가 자신의 로컬 기록 프록시로 해석한다(제어 플레인 프록시 주소를 넘기지 않음).
 	if be := remoteexec.BackendFrom(ctx); be.IsRemote() {
@@ -500,7 +500,7 @@ func (s *Server) runHTTPTool(ctx context.Context, execRaw json.RawMessage, param
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return actool.Errorf("请求失败: " + err.Error()), nil
+		return actool.Errorf("request failed: " + err.Error()), nil
 	}
 	defer resp.Body.Close()
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))

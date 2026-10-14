@@ -36,23 +36,26 @@ The deliverables fall into three groups.
 
 ## 2. Assets preserved in the original language (do not translate)
 
-The following assets keep their original language (Chinese or English) and are not translated. When
+The following assets keep their original language and are not translated. When
 an upstream change touches these assets, **apply it as is, without translating**.
 
-- **The agent's internal reasoning prompts (the "brain" body).** These are the behavioral-instruction
-  bodies in `agent/promptcatalog.go` and the DB seed `agent_prompts`. The behavior was benchmarked
-  against the original (Chinese), so translating it introduces drift in the agent's judgment.
-- **Strings that serve both as display and as agent input.** Some text that appears on the activity
-  timeline while also being fed back as planner/reporter input context (task-abort reasons,
-  interception-block messages, traffic-evidence helpers, and so on) is kept in the original, because
-  a single record serves two purposes. The rationale is recorded case by case under the "brain
-  boundary records" in `work/DECISIONS-FOR-JIWOO.md`.
-- **The original Chinese documents and strings.** Documents keep the original in `README.zh.md` and
-  UI strings keep it in `web/messages/zh.json`, so that diffing against upstream changes stays easy.
-  Korean translations are filled in only in `web/messages/ko.json`.
+- **The original Chinese reference documents and strings.** The originals are kept for diffing against
+  upstream: documents in `README.zh.md` (and the other `*.zh.md`), UI strings in `web/messages/zh.json`
+  (and `ja.json`). Korean translations go in `web/messages/ko.json` and English in `web/messages/en.json`.
 - **Command, payload, code, URL, identifier, and log originals.** These are the originals needed for
-  analysis, so they are not translated. Go code comments are the lowest priority as well and stay in
-  the original until the upstream diff is finished.
+  analysis, so they are not translated.
+- **Detection indicators and wire tokens.** The guard marker `【ARTEX 平台管控·非目标防御】` matched
+  byte-for-byte by the detection rules, and the protocol tokens the code parses (the decision-source
+  sentinel `[模型]`, the chat-mention class labels `漏洞·资产…`, the chat-command prefixes `意图·提示`,
+  and the ICP keyword `备案`), are stable identifiers and are kept in the original rather than translated.
+
+> **Policy change (2026-10).** Previously the agent's internal reasoning prompts (the "brain" body,
+> `agent/promptcatalog.go` and `agent_prompts`), the display-cum-input strings (task-abort reasons,
+> interception-block messages, and so on), and Go code comments were kept in their original Chinese to
+> preserve benchmarked behavior. They are now **translated to English** along with all other source
+> Chinese. The output-language enforcement (`langDirective` in `agent/prompt.go`) is unchanged, so
+> user-facing output still goes out in the configured language (Korean by default). Only the reference
+> documents, technical originals, and detection/wire tokens above are kept as exceptions.
 
 ---
 

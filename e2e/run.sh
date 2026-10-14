@@ -228,7 +228,7 @@ for i in $(seq 1 15); do
   if echo "$TS" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
-sys.exit(0 if (d.get('is_error') is not True and 'target' in d.get('output','') and d.get('output','').strip() not in ('', '无匹配流量。')) else 1)
+sys.exit(0 if (d.get('is_error') is not True and 'target' in d.get('output','') and d.get('output','').strip() not in ('', 'No matching traffic.')) else 1)
 " 2>/dev/null; then
     echo "$TS" | python3 -m json.tool
     ok "traffic_search returned the sandbox-captured exchange"

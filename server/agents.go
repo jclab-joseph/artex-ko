@@ -91,7 +91,7 @@ func (s *Server) initAgentControl(ctx context.Context, dataDir string) {
 	mode := s.offloadMode()
 	mgr, err := agentctl.NewManager(dataDir)
 	if err != nil {
-		log.Printf("[agentctl] 초기화 실패: %v", err)
+		log.Printf("[agentctl] initialization failed: %v", err)
 		// Fail closed in a mandatory posture (보안 리뷰 F7): initialization failure must
 		// NOT silently drop to local execution. Install a fail-closed backend resolver +
 		// (pinned) a never-ready gate, and a failing enrich prober, so no tool runs on the
@@ -104,9 +104,9 @@ func (s *Server) initAgentControl(ctx context.Context, dataDir string) {
 			if s.m != nil && s.m.enrich != nil {
 				s.m.enrich.SetProber(failedProber{mode: mode})
 			}
-			log.Printf("[agentctl] 오프로드=%s → fail-closed 유지(제어 플레인 로컬 실행/작업 시작 차단)", mode)
+			log.Printf("[agentctl] offload=%s → staying fail-closed (control-plane local execution / task start blocked)", mode)
 		} else {
-			log.Printf("[agentctl] 오프로드=%s → in-process 로 계속(분리 비활성)", mode)
+			log.Printf("[agentctl] offload=%s → continuing in-process (split disabled)", mode)
 		}
 		return
 	}
@@ -114,11 +114,11 @@ func (s *Server) initAgentControl(ctx context.Context, dataDir string) {
 
 	if addr := strings.TrimSpace(os.Getenv(envAgentListen)); addr != "" {
 		if err := mgr.StartListener(ctx, addr); err != nil {
-			log.Printf("[agentctl] Agent 수신 리스너 시작 실패(%s): %v", addr, err)
+			log.Printf("[agentctl] failed to start the Agent inbound listener (%s): %v", addr, err)
 		}
 	}
 
-	log.Printf("[agentctl] 실행 플레인 오프로드 모드=%s", mode)
+	log.Printf("[agentctl] execution-plane offload mode=%s", mode)
 	s.engine.SetExecBackendResolver(func(t *Task) remoteexec.Backend {
 		return s.resolveExecBackend(t, mode)
 	})
@@ -133,10 +133,10 @@ func (s *Server) initAgentControl(ctx context.Context, dataDir string) {
 				s.agents.PinTask(taskID, agentID)
 			}
 			if len(sel) > 0 {
-				log.Printf("[agentctl] 복원된 작업→Agent 선택 %d건", len(sel))
+				log.Printf("[agentctl] restored %d task→Agent pin(s)", len(sel))
 			}
 		} else {
-			log.Printf("[agentctl] 작업→Agent 선택 복원 실패: %v", err)
+			log.Printf("[agentctl] failed to restore task→Agent pins: %v", err)
 		}
 	}
 
@@ -450,7 +450,7 @@ func (s *Server) agentsPin(w http.ResponseWriter, r *http.Request) {
 	s.agents.PinTask(taskID, id)
 	if tid, err := strconv.ParseInt(task.ID, 10, 64); err == nil {
 		if err := s.m.pg.SetTaskExecAgent(tid, id); err != nil {
-			log.Printf("[agentctl] 작업 %s Agent 선택 영속화 실패: %v", task.ID, err)
+			log.Printf("[agentctl] failed to persist the Agent pin for task %s: %v", task.ID, err)
 		}
 	}
 	// A newly selected Agent may unblock a "pinned" task that was idling — nudge a round.
@@ -472,7 +472,7 @@ func (s *Server) agentsUnpin(w http.ResponseWriter, r *http.Request) {
 	s.agents.UnpinTask(taskID)
 	if tid, err := strconv.ParseInt(taskID, 10, 64); err == nil {
 		if err := s.m.pg.SetTaskExecAgent(tid, ""); err != nil {
-			log.Printf("[agentctl] 작업 %s Agent 선택 해제 영속화 실패: %v", taskID, err)
+			log.Printf("[agentctl] failed to persist the Agent unpin for task %s: %v", taskID, err)
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"task_id": taskID, "unpinned": true})

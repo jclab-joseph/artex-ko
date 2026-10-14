@@ -1,35 +1,39 @@
-// 渠道字段表与配置值的解析工具。
+// Channel field table and helpers for parsing config values.
 //
-// 与页面拆开是因为这一份是**数据**而不是视图：它描述每种渠道有哪些字段、
-// 各自该用什么控件，以及表单文本到配置值（JSON）的双向转换。
-// 单独放一个文件后，新增渠道只需要动这里，页面本身不必改。
+// Split out from the page because this file is **data**, not a view: it describes which fields
+// each channel has, what control each should use, and the two-way conversion between form text
+// and config values (JSON).
+// Keeping it in its own file means adding a channel only touches this file; the page itself needn't change.
 //
-// 本文件是纯数据模块（非 client component），不能调用 useTranslations。
-// 所以文案不写死在这里，而是存 i18n 键（notifyPage 命名空间），由渲染它们的
-// 组件（page.tsx / channel-form.tsx）用 t() 解析——键是 ASCII，上游中文原文
-// 保留在 messages/zh.json。渠道类型展示名改走 notifyPage.kind.<kind>。
+// This file is a pure data module (not a client component), so it cannot call useTranslations.
+// The copy is therefore not hardcoded here but stored as i18n keys (the notifyPage namespace),
+// resolved with t() by the components that render them (page.tsx / channel-form.tsx) — the keys
+// are ASCII, and the upstream Chinese original stays in messages/zh.json. The channel type
+// display name now goes through notifyPage.kind.<kind>.
 
-// 各渠道的配置字段定义。
+// Config field definitions for each channel.
 //
-// 这里刻意保留一份前端字段表，而不是让后端下发 schema：后端只负责
-// Validate（必填/格式），UI 需要的是布局与控件类型，两者关注的不是同一件事。
-// 唯一的耦合点是 secret_keys —— 哪些字段该渲染成密码框由后端给出，
-// 因为只有渠道实现自己清楚哪些值算凭据（企业微信的整个 Webhook 就是凭据，
-// 而钉钉的只是其中一个 secret）。新增渠道时这里少一个条目只会让表单变空白，
-// 不会静默出错（下面的 hasFields 会提示）。
+// We deliberately keep a front-end field table here rather than having the backend push a schema:
+// the backend only handles validation (required/format), while the UI needs layout and control
+// types — the two aren't concerned with the same thing.
+// The only coupling point is secret_keys — which fields should render as password inputs is decided
+// by the backend, because only the channel implementation itself knows which values count as
+// credentials (WeCom's entire webhook is the credential, whereas DingTalk's is just one secret
+// among them). When adding a channel, a missing entry here only makes the form go blank; it won't
+// fail silently (hasFields below surfaces it).
 //
-// label / help / options[].label 存的是 notifyPage 命名空间下的 i18n 键，
-// placeholder 保留字面值（URL、示例，不翻译）。
+// label / help / options[].label hold i18n keys under the notifyPage namespace;
+// placeholder keeps its literal value (URLs, examples — not translated).
 export type FieldKind = "text" | "password" | "number" | "select" | "textarea" | "switch" | "kv" | "list";
 export interface FieldDef {
   key: string;
-  /** notifyPage 命名空间下的 i18n 键 */
+  /** i18n key under the notifyPage namespace */
   label: string;
   kind: FieldKind;
   placeholder?: string;
-  /** notifyPage 命名空间下的 i18n 键 */
+  /** i18n key under the notifyPage namespace */
   help?: string;
-  /** options[].label 也是 i18n 键 */
+  /** options[].label is also an i18n key */
   options?: { value: string; label: string }[];
 }
 export const CHANNEL_FIELDS: Record<string, FieldDef[]> = {
@@ -118,7 +122,7 @@ export const CHANNEL_FIELDS: Record<string, FieldDef[]> = {
   ],
 };
 
-// value 是过滤用的 min_severity 值，label 是 notifyPage.severityOpt.* 的 i18n 键。
+// value is the min_severity value used for filtering; label is the i18n key notifyPage.severityOpt.*.
 export const SEVERITY_OPTIONS = [
   { value: "", label: "severityOpt.all" },
   { value: "low", label: "severityOpt.low" },
@@ -157,7 +161,7 @@ export const emptyForm = (kind: string): ChannelForm => ({
   onStatusChange: false,
 });
 
-// parseKV 解析「每行 KEY=VALUE」的文本域。
+// parseKV parses a textarea of "KEY=VALUE per line".
 export function parseKV(text: string): Record<string, string> {
   const out: Record<string, string> = {};
   for (const line of text.split("\n")) {
@@ -168,8 +172,9 @@ export function parseKV(text: string): Record<string, string> {
   }
   return out;
 }
-// parseIDs 解析逗号/空白分隔的 id 列表。分隔符保留全角逗号「，」：
-// 用户可能从别处粘贴带全角逗号的列表，这是输入解析逻辑而非展示文案。
+// parseIDs parses a comma/whitespace-separated id list. The separator set keeps the fullwidth
+// comma ，: a user may paste a list containing fullwidth commas from elsewhere — this is
+// input-parsing logic, not display copy.
 export function parseIDs(text: string): number[] {
   return text
     .split(/[\s,，]+/)
@@ -178,8 +183,9 @@ export function parseIDs(text: string): number[] {
     .map((s) => Number(s))
     .filter((n) => Number.isFinite(n) && n > 0);
 }
-// parseKeywords 解析行/逗号分隔的关键词列表（漏洞类型名可能含空格，所以按行或逗号切）。
-// 同样保留全角逗号「，」作为分隔符（输入解析，非展示）。
+// parseKeywords parses a line/comma-separated keyword list (vulnerability class names may contain
+// spaces, so split by line or comma).
+// Likewise keeps the fullwidth comma ， as a separator (input parsing, not display).
 export function parseKeywords(text: string): string[] {
   return text
     .split(/[\n,，]+/)

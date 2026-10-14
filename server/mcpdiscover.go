@@ -67,7 +67,7 @@ func mcpConfigFromDB(m *db.MCPServer) mcpconn.Config {
 func (s *Server) agentHostedMCPConfigs() []mcpconn.Config {
 	all, err := s.m.pg.ListMCP()
 	if err != nil {
-		log.Printf("[mcp] agent-hosted 목록 조회 실패: %v", err)
+		log.Printf("[mcp] failed to query the agent-hosted list: %v", err)
 		return nil
 	}
 	var out []mcpconn.Config

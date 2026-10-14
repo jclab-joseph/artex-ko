@@ -49,28 +49,28 @@ func run() int {
 	fmt.Printf("ARTEX agent %s  ·  execution plane\n", version)
 
 	if *bundlePath == "" {
-		log.Printf("[agent] 연결 번들이 필요합니다: --bundle <path> 또는 ARTEX_AGENT_BUNDLE")
+		log.Printf("[agent] a connection bundle is required: --bundle <path> or ARTEX_AGENT_BUNDLE")
 		return 2
 	}
 	raw, err := os.ReadFile(*bundlePath)
 	if err != nil {
-		log.Printf("[agent] 번들을 읽지 못했습니다: %v", err)
+		log.Printf("[agent] could not read the bundle: %v", err)
 		return 2
 	}
 	bundle, err := remoteexec.ParseBundle(raw)
 	if err != nil {
-		log.Printf("[agent] 번들이 올바르지 않습니다: %v", err)
+		log.Printf("[agent] the bundle is invalid: %v", err)
 		return 2
 	}
 	if bundle.Expired() {
-		log.Printf("[agent] 번들의 인증서가 만료되었습니다(발급 %s · 만료 %s). 관리 서버에서 새 번들을 발급받아 다시 실행하십시오.",
+		log.Printf("[agent] the bundle's certificate has expired (issued %s · expires %s). Get a new bundle from the management server and run again.",
 			bundle.Issued.Format(time.RFC3339), bundle.Expires.Format(time.RFC3339))
 		return 2
 	}
 
 	absWork, _ := filepath.Abs(*workDir)
 	if err := os.MkdirAll(absWork, 0o755); err != nil {
-		log.Printf("[agent] 작업 디렉터리를 만들지 못했습니다(%s): %v", absWork, err)
+		log.Printf("[agent] could not create the working directory (%s): %v", absWork, err)
 		return 2
 	}
 
@@ -83,12 +83,12 @@ func run() int {
 	if *trafficOn {
 		var err error
 		if tr, err = traffic.Open(filepath.Join(absWork, "_traffic"), *trafficAddr); err != nil {
-			log.Printf("[agent] 트래픽 레코더를 열지 못했습니다(%s): %v", *trafficAddr, err)
+			log.Printf("[agent] could not open the traffic recorder (%s): %v", *trafficAddr, err)
 			return 2
 		}
 		go func() {
 			if err := tr.Start(); err != nil {
-				log.Printf("[agent] 트래픽 레코더 종료: %v", err)
+				log.Printf("[agent] traffic recorder closed: %v", err)
 			}
 		}()
 		defer tr.Close()
@@ -97,15 +97,15 @@ func run() int {
 		// at the local recorder (which re-signs HTTPS with its own CA).
 		if *egressProxy != "" {
 			if err := tr.SetUpstreamProxy(*egressProxy); err != nil {
-				log.Printf("[agent] 상위 프록시 설정 실패(%s): %v", *egressProxy, err)
+				log.Printf("[agent] failed to set the upstream proxy (%s): %v", *egressProxy, err)
 				return 2
 			}
-			log.Printf("[agent] 트래픽 레코더 상위 프록시=%s", *egressProxy)
+			log.Printf("[agent] traffic recorder upstream proxy=%s", *egressProxy)
 		}
 		*egressProxy = tr.ProxyAddr()
 		*egressCA = tr.CACertPath()
 		waitForFile(*egressCA, 5*time.Second) // CA is written on first proxy start
-		log.Printf("[agent] 트래픽 레코더 on: %s (store=%s)", tr.ProxyAddr(), filepath.Join(absWork, "_traffic"))
+		log.Printf("[agent] traffic recorder on: %s (store=%s)", tr.ProxyAddr(), filepath.Join(absWork, "_traffic"))
 	}
 
 	// Build the execution tool set. WebFetch and Bash both egress through the local
@@ -143,24 +143,24 @@ func run() int {
 	for _, cfg := range bundle.MCP {
 		cl, err := mcpconn.Connect(context.Background(), cfg)
 		if err != nil {
-			log.Printf("[agent] MCP %q 연결 실패: %v", cfg.Name, err)
+			log.Printf("[agent] MCP %q connection failed: %v", cfg.Name, err)
 			continue
 		}
 		mcpClosers = append(mcpClosers, cl)
 		ts, err := cl.Tools(context.Background())
 		if err != nil {
-			log.Printf("[agent] MCP %q tools/list 실패: %v", cfg.Name, err)
+			log.Printf("[agent] MCP %q tools/list failed: %v", cfg.Name, err)
 			continue
 		}
 		tools = append(tools, ts...)
-		log.Printf("[agent] MCP %q 호스팅: %d개 도구", cfg.Name, len(ts))
+		log.Printf("[agent] MCP %q hosted: %d tool(s)", cfg.Name, len(ts))
 	}
 	exec := remoteexec.NewExecutor(tools, absWork, bashEnv)
 	// Host the background-task + interactive-shell Manager in the sandbox so Monitor/
 	// shell_* keep their state here. Best-effort: on failure those tools report "not
 	// enabled" rather than falling back to the control plane.
 	if err := exec.EnableBackgroundTasks(bundle.AgentID); err != nil {
-		log.Printf("[agent] 백그라운드/대화형 셸 매니저 초기화 실패(해당 도구 비활성): %v", err)
+		log.Printf("[agent] failed to initialize the background/interactive shell manager (those tools disabled): %v", err)
 	}
 	defer exec.Cleanup()
 
@@ -175,7 +175,7 @@ func run() int {
 
 	for {
 		if bundle.Expired() {
-			log.Printf("[agent] 인증서 만료 — 재프로비저닝이 필요합니다. 종료합니다.")
+			log.Printf("[agent] certificate expired — reprovisioning required. Exiting.")
 			return 2
 		}
 		sess, err := remoteexec.ConnectAgentSide(ctx, bundle, exec)
@@ -183,13 +183,13 @@ func run() int {
 			if ctx.Err() != nil {
 				return 0
 			}
-			log.Printf("[agent] 연결 실패: %v (%.0fs 후 재시도)", err, retry.Seconds())
+			log.Printf("[agent] connection failed: %v (retrying in %.0fs)", err, retry.Seconds())
 			if !sleepCtx(ctx, *retry) {
 				return 0
 			}
 			continue
 		}
-		log.Printf("[agent] 관리 서버와 연결되었습니다. 실행 대기 중.")
+		log.Printf("[agent] connected to the management server. Waiting for execution.")
 		select {
 		case <-sess.Done():
 			// The control-plane connection dropped. Per-connection teardown (kill background
@@ -200,7 +200,7 @@ func run() int {
 			if ctx.Err() != nil {
 				return 0
 			}
-			log.Printf("[agent] 연결이 끊어졌습니다: %v (%.0fs 후 재연결)", sess.Err(), retry.Seconds())
+			log.Printf("[agent] connection lost: %v (reconnecting in %.0fs)", sess.Err(), retry.Seconds())
 			if !sleepCtx(ctx, *retry) {
 				return 0
 			}

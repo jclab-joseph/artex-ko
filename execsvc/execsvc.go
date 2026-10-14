@@ -68,7 +68,7 @@ func ScriptTool() actool.CoreTool {
 			var sp ScriptInput
 			_ = json.Unmarshal(in, &sp)
 			if strings.TrimSpace(sp.Code) == "" {
-				return actool.Errorf("script code 为空"), nil
+				return actool.Errorf("script code is empty"), nil
 			}
 			interp := resolveInterp(sp.Interp)
 			if interp == "" {
@@ -181,7 +181,7 @@ func runScript(ctx context.Context, interp, key, code string, params map[string]
 
 	body := buf.String()
 	if runCtx.Err() == context.DeadlineExceeded {
-		body += "\n... [超时终止] ..."
+		body += "\n... [timed out] ..."
 	} else if waitErr != nil {
 		body += "\n[exit: " + waitErr.Error() + "]"
 	}
@@ -224,7 +224,7 @@ func HTTPTool(egressProxy, egressCA string) actool.CoreTool {
 				method = "GET"
 			}
 			if strings.TrimSpace(sp.URL) == "" {
-				return actool.Errorf("http url 为空"), nil
+				return actool.Errorf("http url is empty"), nil
 			}
 			var bodyReader io.Reader
 			if sp.Body != "" {
@@ -251,7 +251,7 @@ func HTTPTool(egressProxy, egressCA string) actool.CoreTool {
 			}
 			resp, err := client.Do(req)
 			if err != nil {
-				return actool.Errorf("请求失败: " + err.Error()), nil
+				return actool.Errorf("request failed: " + err.Error()), nil
 			}
 			defer resp.Body.Close()
 			respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))

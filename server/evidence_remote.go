@@ -52,7 +52,7 @@ func (r *splitEvidenceSource) ReadEvidence(ctx context.Context, ids []string, co
 	}
 	// (3) No run context in split mode: route to the task's OWN Agent; fail closed otherwise.
 	if r.agents == nil {
-		return errors.New("流量录制运行在隔离沙箱 Agent 中，但执行面控制未初始化；无法同步证据。")
+		return errors.New("트래픽 녹화가 격리된 샌드박스 Agent 에서 실행되지만, 실행 플레인 제어가 초기화되지 않아 증거를 동기화할 수 없습니다.")
 	}
 	agentID := r.agents.PinnedAgentID(r.taskID)
 	if r.taskID == "" || agentID == "" {

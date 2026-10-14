@@ -61,7 +61,7 @@ func (m *metaTool) CheckPermissions(context.Context, json.RawMessage, permission
 	return permission.Allowed()
 }
 func (m *metaTool) Call(context.Context, json.RawMessage, *actool.ToolContext) (actool.Result, error) {
-	return actool.Errorf("【ARTEX 平台管控·执行面未就绪】此工具由沙箱 Agent 托管但当前未路由到 Agent（Agent 未连接或未提供该工具）。"), nil
+	return actool.Errorf("【ARTEX Platform Control · Execution Plane Not Ready】This tool is hosted by the sandbox Agent but is not currently routed to an Agent (the Agent is not connected, or does not provide this tool)."), nil
 }
 
 // CoreToolFromMeta rebuilds a metadata-only CoreTool from an announced WireToolMeta.
