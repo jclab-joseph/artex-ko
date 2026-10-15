@@ -8,7 +8,7 @@ La interfaz y la salida generada están en inglés de forma predeterminada y **p
 
 Español · [English](README.md) · [한국어](README.ko.md) · [中文](README.zh.md) · [日本語](README.ja.md)
 
-[![ci](https://github.com/jiwoochris/artex-global/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/jiwoochris/artex-global/actions/workflows/ci.yml) [![detections](https://github.com/jiwoochris/artex-global/actions/workflows/detections.yml/badge.svg?branch=main)](https://github.com/jiwoochris/artex-global/actions/workflows/detections.yml) [![web](https://github.com/jiwoochris/artex-global/actions/workflows/web.yml/badge.svg?branch=main)](https://github.com/jiwoochris/artex-global/actions/workflows/web.yml) [![license: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
+[![ci](https://github.com/jclab-oss/artex-plane/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/jclab-oss/artex-plane/actions/workflows/ci.yml) [![detections](https://github.com/jclab-oss/artex-plane/actions/workflows/detections.yml/badge.svg?branch=main)](https://github.com/jclab-oss/artex-plane/actions/workflows/detections.yml) [![web](https://github.com/jclab-oss/artex-plane/actions/workflows/web.yml/badge.svg?branch=main)](https://github.com/jclab-oss/artex-plane/actions/workflows/web.yml) [![license: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 
 </div>
 
@@ -93,8 +93,8 @@ Las pantallas originales (interfaz en chino) están disponibles en [`README.zh.m
 > **Imagen:** el servicio `artex` de `docker-compose.yml` descarga `ghcr.io/jclab-oss/artex-plane`, la imagen de la edición global que este repositorio publica en GitHub Container Registry con cada etiqueta de versión (`v*`). La etiqueta predeterminada es `latest` (la versión más reciente); fije `ARTEX_TAG` en `.env` para anclar una versión concreta. La imagen original `autumn27/artex` se ha retirado de Docker Hub y ya no se utiliza.
 
 ```bash
-git clone https://github.com/jiwoochris/artex-global.git
-cd artex-global
+git clone https://github.com/jclab-oss/artex-plane.git
+cd artex-plane
 cp .env.example .env          # set POSTGRES_PASSWORD; ANTHROPIC_API_KEY is optional
 docker compose up -d          # brings up the artex image + postgres together
 # → open http://localhost:8787 (on first visit, set the admin password at /setup)

@@ -258,7 +258,7 @@ chore(upstream): 상류 d003372..b55ceb1 반영 (intercept 토큰 계량) + 신�
 
 ### 8.1 저장소 CI 상태는 저장소를 지정해서 확인합니다
 
-이 저장소는 상류 ARTEX 의 포크라서, 로컬 `git remote` 에 `origin`(jiwoochris/artex-global)과
+이 저장소는 상류 ARTEX 의 포크라서, 로컬 `git remote` 에 `origin`(jclab-oss/artex-plane)과
 `upstream`(Autumn-27/ARTEX)이 함께 등록되어 있습니다(3절 참조). 이 상태에서 `gh` 명령에
 저장소를 지정하지 않으면, `gh` 가 **상류 저장소를 기본값으로 골라** 우리 워크플로가 없는
 상류의 실행 결과를 보여 줍니다. 그러면 상류 CI 가 초록인 것을 보고 **우리 CI 가 통과했다고
@@ -268,8 +268,8 @@ chore(upstream): 상류 d003372..b55ceb1 반영 (intercept 토큰 계량) + 신�
 그래서 CI 를 확인할 때는 항상 저장소를 명시합니다.
 
 ```bash
-gh run list -R jiwoochris/artex-global --workflow ci.yml --limit 5
-gh run list -R jiwoochris/artex-global --workflow detections.yml --limit 5
+gh run list -R jclab-oss/artex-plane --workflow ci.yml --limit 5
+gh run list -R jclab-oss/artex-plane --workflow detections.yml --limit 5
 ```
 
 한 번 설정해 두면 `-R` 를 생략해도 우리 저장소를 기본으로 보도록 바꿀 수 있습니다. 다만 이
@@ -277,8 +277,8 @@ gh run list -R jiwoochris/artex-global --workflow detections.yml --limit 5
 지정해야 합니다.
 
 ```bash
-gh repo set-default jiwoochris/artex-global
-gh repo set-default --view   # jiwoochris/artex-global 가 보이는지 확인
+gh repo set-default jclab-oss/artex-plane
+gh repo set-default --view   # jclab-oss/artex-plane 가 보이는지 확인
 ```
 
 ### 8.2 문서의 외부 링크는 브라우저처럼 GET 으로 확인합니다

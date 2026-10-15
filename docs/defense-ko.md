@@ -155,9 +155,9 @@ description: |
     signature; tune the count and window to your own baseline. On its own this leg is low signal
     and earns weight only inside the correlation below.
 references:
-    - https://github.com/jiwoochris/artex-global/blob/main/docs/defense-ko.md
-    - https://github.com/jiwoochris/artex-global/blob/main/docs/defense-en.md
-author: artex-global defense guide (generic template)
+    - https://github.com/jclab-oss/artex-plane/blob/main/docs/defense-ko.md
+    - https://github.com/jclab-oss/artex-plane/blob/main/docs/defense-en.md
+author: artex-plane defense guide (generic template)
 date: 2026-10-07
 tags:
     - attack.reconnaissance
@@ -185,9 +185,9 @@ description: |
     correlation below. Extend the marker list to your own probe corpus and WAF categories; it is
     a coarse proxy for the broader "adapts requests to responses" behaviour the guide describes.
 references:
-    - https://github.com/jiwoochris/artex-global/blob/main/docs/defense-ko.md
-    - https://github.com/jiwoochris/artex-global/blob/main/docs/defense-en.md
-author: artex-global defense guide (generic template)
+    - https://github.com/jclab-oss/artex-plane/blob/main/docs/defense-ko.md
+    - https://github.com/jclab-oss/artex-plane/blob/main/docs/defense-en.md
+author: artex-plane defense guide (generic template)
 date: 2026-10-07
 tags:
     - attack.initial-access
@@ -218,9 +218,9 @@ description: |
     often expose weaker identity-verification endpoints than the main service and belong here
     too. This leg is broad by design and is only meaningful inside the correlation below.
 references:
-    - https://github.com/jiwoochris/artex-global/blob/main/docs/defense-ko.md
-    - https://github.com/jiwoochris/artex-global/blob/main/docs/defense-en.md
-author: artex-global defense guide (generic template)
+    - https://github.com/jclab-oss/artex-plane/blob/main/docs/defense-ko.md
+    - https://github.com/jclab-oss/artex-plane/blob/main/docs/defense-en.md
+author: artex-plane defense guide (generic template)
 date: 2026-10-07
 tags:
     - attack.credential-access
@@ -256,9 +256,9 @@ description: |
     session identifier if you have one) and tune the window to your baseline. If three legs are
     too strict and miss cases, relax to any two of the three.
 references:
-    - https://github.com/jiwoochris/artex-global/blob/main/docs/defense-ko.md
-    - https://github.com/jiwoochris/artex-global/blob/main/docs/defense-en.md
-author: artex-global defense guide (generic template)
+    - https://github.com/jclab-oss/artex-plane/blob/main/docs/defense-ko.md
+    - https://github.com/jclab-oss/artex-plane/blob/main/docs/defense-en.md
+author: artex-plane defense guide (generic template)
 date: 2026-10-07
 tags:
     - attack.initial-access

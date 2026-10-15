@@ -15,7 +15,7 @@ func TestStartupMessageSwitchesLanguage(t *testing.T) {
 	t.Setenv("ARTEX_PG_DSN", "")
 	t.Setenv("ARTEX_CONFIG", filepath.Join(dir, "nope.json"))
 
-	// Default (no ARTEX_LANG) → English (artex-global default).
+	// Default (no ARTEX_LANG) → English (artex-plane default).
 	t.Setenv("ARTEX_LANG", "")
 	def := mustDSNErr(t)
 	if hasHangul(def) {

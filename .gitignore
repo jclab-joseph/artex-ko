@@ -56,7 +56,7 @@ Thumbs.db
 /bench/
 /Dockerfile.bench
 /Dockerfile.bench.v2
-# --- artex-global 로컬 운영: 커밋 금지 (소유자 지시: 테스트/스캔 결과 비공개) ---
+# --- artex-plane 로컬 운영: 커밋 금지 (소유자 지시: 테스트/스캔 결과 비공개) ---
 work/
 test-results/
 scan-output/

@@ -2,11 +2,11 @@
 
 한국어 · [English](CONTRIBUTING.en.md)
 
-ARTEX 글로벌판(`artex-global`)에 관심을 가져 주셔서 고맙습니다. 이 문서는 기여를 시작하기 전에
+ARTEX 글로벌판(`artex-plane`)에 관심을 가져 주셔서 고맙습니다. 이 문서는 기여를 시작하기 전에
 알아 두어야 할 범위·방침·절차를 한국어로 정리한 것입니다. 기여를 보내기 전에 반드시
 [사용 범위와 법적 책임](#사용-범위와-법적-책임)과 [현지화 방침](#현지화-방침)을 먼저 읽어 주십시오.
 
-- 버그를 신고하거나 기능을 제안하려면 → [이슈 템플릿](https://github.com/jiwoochris/artex-global/issues/new/choose)을 사용하십시오.
+- 버그를 신고하거나 기능을 제안하려면 → [이슈 템플릿](https://github.com/jclab-oss/artex-plane/issues/new/choose)을 사용하십시오.
 - 번역·현지화 오류를 발견했다면 → "번역·현지화 오류" 이슈 템플릿을 사용하십시오.
 - 보안 취약점을 발견했다면 → **공개 이슈로 올리지 말고** [SECURITY.md](SECURITY.md)의 절차를 따라 주십시오.
 - 모든 참여자는 [행동 강령(CODE_OF_CONDUCT.md)](CODE_OF_CONDUCT.md)을 지켜야 합니다.

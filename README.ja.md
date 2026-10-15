@@ -8,7 +8,7 @@ UI と生成される出力はデフォルトで英語になっており、**設
 
 日本語 · [English](README.md) · [한국어](README.ko.md) · [中文](README.zh.md) · [Español](README.es.md)
 
-[![ci](https://github.com/jiwoochris/artex-global/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/jiwoochris/artex-global/actions/workflows/ci.yml) [![detections](https://github.com/jiwoochris/artex-global/actions/workflows/detections.yml/badge.svg?branch=main)](https://github.com/jiwoochris/artex-global/actions/workflows/detections.yml) [![web](https://github.com/jiwoochris/artex-global/actions/workflows/web.yml/badge.svg?branch=main)](https://github.com/jiwoochris/artex-global/actions/workflows/web.yml) [![license: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
+[![ci](https://github.com/jclab-oss/artex-plane/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/jclab-oss/artex-plane/actions/workflows/ci.yml) [![detections](https://github.com/jclab-oss/artex-plane/actions/workflows/detections.yml/badge.svg?branch=main)](https://github.com/jclab-oss/artex-plane/actions/workflows/detections.yml) [![web](https://github.com/jclab-oss/artex-plane/actions/workflows/web.yml/badge.svg?branch=main)](https://github.com/jclab-oss/artex-plane/actions/workflows/web.yml) [![license: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 
 </div>
 
@@ -93,8 +93,8 @@ ARTEX は、**自分が所有する標的、または明示的な書面による
 > **イメージ:** `docker-compose.yml` の `artex` サービスは `ghcr.io/jclab-oss/artex-plane` を取得します。これは、このリポジトリがリリースタグ（`v*`）ごとに GitHub Container Registry に公開するグローバル版のイメージです。デフォルトのタグは `latest`（最新リリース）です。特定のリリースに固定するには `.env` で `ARTEX_TAG` を設定してください。上流のオリジナルイメージ `autumn27/artex` は Docker Hub から取り下げられており、もう使われていません。
 
 ```bash
-git clone https://github.com/jiwoochris/artex-global.git
-cd artex-global
+git clone https://github.com/jclab-oss/artex-plane.git
+cd artex-plane
 cp .env.example .env          # set POSTGRES_PASSWORD; ANTHROPIC_API_KEY is optional
 docker compose up -d          # brings up the artex image + postgres together
 # → open http://localhost:8787 (on first visit, set the admin password at /setup)

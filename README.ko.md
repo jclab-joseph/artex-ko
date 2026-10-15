@@ -8,7 +8,7 @@
 
 한국어 · [中文](README.zh.md) · [English](README.md) · [Español](README.es.md) · [日本語](README.ja.md)
 
-[![ci](https://github.com/jiwoochris/artex-global/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/jiwoochris/artex-global/actions/workflows/ci.yml) [![detections](https://github.com/jiwoochris/artex-global/actions/workflows/detections.yml/badge.svg?branch=main)](https://github.com/jiwoochris/artex-global/actions/workflows/detections.yml) [![web](https://github.com/jiwoochris/artex-global/actions/workflows/web.yml/badge.svg?branch=main)](https://github.com/jiwoochris/artex-global/actions/workflows/web.yml) [![license: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
+[![ci](https://github.com/jclab-oss/artex-plane/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/jclab-oss/artex-plane/actions/workflows/ci.yml) [![detections](https://github.com/jclab-oss/artex-plane/actions/workflows/detections.yml/badge.svg?branch=main)](https://github.com/jclab-oss/artex-plane/actions/workflows/detections.yml) [![web](https://github.com/jclab-oss/artex-plane/actions/workflows/web.yml/badge.svg?branch=main)](https://github.com/jclab-oss/artex-plane/actions/workflows/web.yml) [![license: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 
 </div>
 
@@ -100,8 +100,8 @@ ARTEX 는 **자신이 소유하거나 서면으로 명시적 허가를 받은 �
 > **이미지:** `docker-compose.yml` 의 `artex` 서비스는 이 저장소가 릴리스 태그(`v*`)마다 GitHub Container Registry 에 발행하는 글로벌판 이미지 `ghcr.io/jclab-oss/artex-plane` 를 받습니다. 기본 태그는 `latest`(가장 최근 릴리스)이고, `.env` 의 `ARTEX_TAG` 로 특정 릴리스에 고정할 수 있습니다. 원본 저장소의 이미지 `autumn27/artex` 는 Docker Hub 에서 내려가 더는 쓰지 않습니다.
 
 ```bash
-git clone https://github.com/jiwoochris/artex-global.git
-cd artex-global
+git clone https://github.com/jclab-oss/artex-plane.git
+cd artex-plane
 cp .env.example .env          # POSTGRES_PASSWORD 설정, ANTHROPIC_API_KEY 는 선택
 docker compose up -d          # artex 이미지 + postgres 를 함께 기동
 # → http://localhost:8787 접속 (처음 들어가면 /setup 에서 관리자 비밀번호 설정)
