@@ -382,7 +382,7 @@ The workflow is split into five jobs.
 - **release.** Gathers all zips, generates a `SHA256SUMS` checksum file, and creates a GitHub Release
   with the zips and the checksum attached.
 - **docker.** Takes the linux binaries cross-compiled by binaries, builds a multi-architecture
-  (amd64/arm64) image, and pushes it to GitHub Container Registry as `ghcr.io/jiwoochris/artex-global`
+  (amd64/arm64) image, and pushes it to GitHub Container Registry as `ghcr.io/jclab-oss/artex-plane`
   with the release tag and `latest`. It logs in with the workflow's built-in `GITHUB_TOKEN` (job
   permission `packages: write`), so no extra secrets are needed.
 
@@ -407,7 +407,7 @@ current repository structure by reproducing the binaries job locally.
 
 ### 9.4 The Docker image namespace
 
-Images are published to `ghcr.io/jiwoochris/artex-global`, a namespace this fork owns, and
+Images are published to `ghcr.io/jclab-oss/artex-plane`, a namespace this fork owns, and
 `docker-compose.yml` pulls that image (decided 2026-10-11, `work/DECISIONS-FOR-JIWOO.md`, item 8).
 Upstream's `autumn27/artex` has been taken down from Docker Hub and this fork has no push access to
 it, so it is no longer used. A GHCR package may be created as private on its first publish, so after

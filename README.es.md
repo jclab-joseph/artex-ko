@@ -90,7 +90,7 @@ Las pantallas originales (interfaz en chino) están disponibles en [`README.zh.m
 
 > **Requisitos previos:** Docker y Docker Compose. La base de datos es **PostgreSQL**, levantada por compose. La exploración requiere un **LLM** (`ANTHROPIC_API_KEY` u `OPENAI_API_KEY`; también se puede configurar en la interfaz).
 
-> **Imagen:** el servicio `artex` de `docker-compose.yml` descarga `ghcr.io/jiwoochris/artex-global`, la imagen de la edición global que este repositorio publica en GitHub Container Registry con cada etiqueta de versión (`v*`). La etiqueta predeterminada es `latest` (la versión más reciente); fije `ARTEX_TAG` en `.env` para anclar una versión concreta. La imagen original `autumn27/artex` se ha retirado de Docker Hub y ya no se utiliza.
+> **Imagen:** el servicio `artex` de `docker-compose.yml` descarga `ghcr.io/jclab-oss/artex-plane`, la imagen de la edición global que este repositorio publica en GitHub Container Registry con cada etiqueta de versión (`v*`). La etiqueta predeterminada es `latest` (la versión más reciente); fije `ARTEX_TAG` en `.env` para anclar una versión concreta. La imagen original `autumn27/artex` se ha retirado de Docker Hub y ya no se utiliza.
 
 ```bash
 git clone https://github.com/jiwoochris/artex-global.git
@@ -107,7 +107,7 @@ La imagen incluye herramientas habituales (ripgrep, curl, vim, npm, nmap y más)
 
 El proyecto original ofrece varios métodos: un script de instalación (`./install.sh`), binarios precompilados (Releases) y una compilación de binario único desde el código fuente. Los comandos y el procedimiento completo están reunidos en la sección "安装" (Instalación) de [`README.zh.md`](README.zh.md#安装) (en chino); lo esencial se reproduce a continuación.
 
-- **Script de instalación:** ejecutar `./install.sh` detecta/instala Docker y luego le permite elegir "① todo en Docker" o "② compilar y ejecutar localmente". "① todo en Docker" descarga y arranca la misma imagen que el inicio rápido de arriba (`ghcr.io/jiwoochris/artex-global`), mientras que "② compilar y ejecutar localmente" la construye usted mismo de la misma manera que la **compilación de binario único desde el código fuente** descrita abajo.
+- **Script de instalación:** ejecutar `./install.sh` detecta/instala Docker y luego le permite elegir "① todo en Docker" o "② compilar y ejecutar localmente". "① todo en Docker" descarga y arranca la misma imagen que el inicio rápido de arriba (`ghcr.io/jclab-oss/artex-plane`), mientras que "② compilar y ejecutar localmente" la construye usted mismo de la misma manera que la **compilación de binario único desde el código fuente** descrita abajo.
 - **Compilación de binario único desde el código fuente:**
 
   ```bash

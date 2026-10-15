@@ -358,7 +358,7 @@ git push origin v0.3.15
 - **release.** 모든 zip 을 모아 `SHA256SUMS` 체크섬을 만들고, GitHub Release 를 생성해 zip 과
   체크섬을 첨부합니다.
 - **docker.** binaries 가 교차 컴파일한 linux 바이너리를 받아 멀티아키텍처(amd64·arm64) 이미지를
-  빌드하고 GitHub Container Registry 의 `ghcr.io/jiwoochris/artex-global` 에 릴리스 태그와 `latest`
+  빌드하고 GitHub Container Registry 의 `ghcr.io/jclab-oss/artex-plane` 에 릴리스 태그와 `latest`
   로 올립니다. 로그인은 워크플로 기본 `GITHUB_TOKEN`(잡 권한 `packages: write`)으로 하므로 따로
   둘 시크릿이 없습니다.
 
@@ -384,7 +384,7 @@ git push origin v0.3.15
 
 ### 9.4 Docker 이미지 네임스페이스
 
-이미지는 이 포크가 소유한 `ghcr.io/jiwoochris/artex-global` 로 발행하고, `docker-compose.yml` 도 이
+이미지는 이 포크가 소유한 `ghcr.io/jclab-oss/artex-plane` 로 발행하고, `docker-compose.yml` 도 이
 이미지를 받습니다(2026-10-11 결정, `work/DECISIONS-FOR-JIWOO.md` 8번 항목). 상류의
 `autumn27/artex` 는 Docker Hub 에서 내려갔고 이 포크에는 push 권한도 없어 쓰지 않습니다.
 GHCR 패키지는 처음 발행될 때 비공개로 만들어질 수 있으니, 첫 릴리스 뒤 패키지 설정에서 공개
