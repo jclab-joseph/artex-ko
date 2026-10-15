@@ -8,7 +8,7 @@ UI と生成される出力はデフォルトで英語になっており、**設
 
 日本語 · [English](README.md) · [한국어](README.ko.md) · [中文](README.zh.md) · [Español](README.es.md)
 
-[![ci](https://github.com/jiwoochris/artex-global/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/jiwoochris/artex-global/actions/workflows/ci.yml) [![detections](https://github.com/jiwoochris/artex-global/actions/workflows/detections.yml/badge.svg?branch=main)](https://github.com/jiwoochris/artex-global/actions/workflows/detections.yml) [![web](https://github.com/jiwoochris/artex-global/actions/workflows/web.yml/badge.svg?branch=main)](https://github.com/jiwoochris/artex-global/actions/workflows/web.yml) [![license: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
+[![ci](https://github.com/jclab-oss/artex-plane/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/jclab-oss/artex-plane/actions/workflows/ci.yml) [![detections](https://github.com/jclab-oss/artex-plane/actions/workflows/detections.yml/badge.svg?branch=main)](https://github.com/jclab-oss/artex-plane/actions/workflows/detections.yml) [![web](https://github.com/jclab-oss/artex-plane/actions/workflows/web.yml/badge.svg?branch=main)](https://github.com/jclab-oss/artex-plane/actions/workflows/web.yml) [![license: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 
 </div>
 
@@ -90,11 +90,11 @@ ARTEX は、**自分が所有する標的、または明示的な書面による
 
 > **前提条件:** Docker と Docker Compose。データベースは **PostgreSQL** で、compose が立ち上げます。探索には **LLM**（`ANTHROPIC_API_KEY` または `OPENAI_API_KEY`。UI でも設定できます）が必要です。
 
-> **イメージ:** `docker-compose.yml` の `artex` サービスは `ghcr.io/jiwoochris/artex-global` を取得します。これは、このリポジトリがリリースタグ（`v*`）ごとに GitHub Container Registry に公開するグローバル版のイメージです。デフォルトのタグは `latest`（最新リリース）です。特定のリリースに固定するには `.env` で `ARTEX_TAG` を設定してください。上流のオリジナルイメージ `autumn27/artex` は Docker Hub から取り下げられており、もう使われていません。
+> **イメージ:** `docker-compose.yml` の `artex` サービスは `ghcr.io/jclab-oss/artex-plane` を取得します。これは、このリポジトリがリリースタグ（`v*`）ごとに GitHub Container Registry に公開するグローバル版のイメージです。デフォルトのタグは `latest`（最新リリース）です。特定のリリースに固定するには `.env` で `ARTEX_TAG` を設定してください。上流のオリジナルイメージ `autumn27/artex` は Docker Hub から取り下げられており、もう使われていません。
 
 ```bash
-git clone https://github.com/jiwoochris/artex-global.git
-cd artex-global
+git clone https://github.com/jclab-oss/artex-plane.git
+cd artex-plane
 cp .env.example .env          # set POSTGRES_PASSWORD; ANTHROPIC_API_KEY is optional
 docker compose up -d          # brings up the artex image + postgres together
 # → open http://localhost:8787 (on first visit, set the admin password at /setup)
@@ -107,7 +107,7 @@ docker compose up -d          # brings up the artex image + postgres together
 
 上流はいくつかの方法を提供しています。インストールスクリプト（`./install.sh`）、プリコンパイル済みバイナリ（Releases）、ソースからの単一バイナリビルドです。コマンドと手順の全体は [`README.zh.md`](README.zh.md#安装) の「安装」（インストール）の節（中国語）にまとめてありますが、要点を以下に再掲します。
 
-- **インストールスクリプト:** `./install.sh` を実行すると Docker を検出／インストールし、続いて「① すべて Docker で」または「② ローカルでコンパイルして実行」を選べます。「① すべて Docker で」は上記のクイックスタートと同じイメージ（`ghcr.io/jiwoochris/artex-global`）を取得して起動します。一方「② ローカルでコンパイルして実行」は、下記の **ソースからの単一バイナリビルド** と同じやり方で自分でビルドします。
+- **インストールスクリプト:** `./install.sh` を実行すると Docker を検出／インストールし、続いて「① すべて Docker で」または「② ローカルでコンパイルして実行」を選べます。「① すべて Docker で」は上記のクイックスタートと同じイメージ（`ghcr.io/jclab-oss/artex-plane`）を取得して起動します。一方「② ローカルでコンパイルして実行」は、下記の **ソースからの単一バイナリビルド** と同じやり方で自分でビルドします。
 - **ソースからの単一バイナリビルド:**
 
   ```bash

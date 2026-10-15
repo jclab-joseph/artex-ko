@@ -258,7 +258,7 @@ chore(upstream): 상류 d003372..b55ceb1 반영 (intercept 토큰 계량) + 신�
 
 ### 8.1 저장소 CI 상태는 저장소를 지정해서 확인합니다
 
-이 저장소는 상류 ARTEX 의 포크라서, 로컬 `git remote` 에 `origin`(jiwoochris/artex-global)과
+이 저장소는 상류 ARTEX 의 포크라서, 로컬 `git remote` 에 `origin`(jclab-oss/artex-plane)과
 `upstream`(Autumn-27/ARTEX)이 함께 등록되어 있습니다(3절 참조). 이 상태에서 `gh` 명령에
 저장소를 지정하지 않으면, `gh` 가 **상류 저장소를 기본값으로 골라** 우리 워크플로가 없는
 상류의 실행 결과를 보여 줍니다. 그러면 상류 CI 가 초록인 것을 보고 **우리 CI 가 통과했다고
@@ -268,8 +268,8 @@ chore(upstream): 상류 d003372..b55ceb1 반영 (intercept 토큰 계량) + 신�
 그래서 CI 를 확인할 때는 항상 저장소를 명시합니다.
 
 ```bash
-gh run list -R jiwoochris/artex-global --workflow ci.yml --limit 5
-gh run list -R jiwoochris/artex-global --workflow detections.yml --limit 5
+gh run list -R jclab-oss/artex-plane --workflow ci.yml --limit 5
+gh run list -R jclab-oss/artex-plane --workflow detections.yml --limit 5
 ```
 
 한 번 설정해 두면 `-R` 를 생략해도 우리 저장소를 기본으로 보도록 바꿀 수 있습니다. 다만 이
@@ -277,8 +277,8 @@ gh run list -R jiwoochris/artex-global --workflow detections.yml --limit 5
 지정해야 합니다.
 
 ```bash
-gh repo set-default jiwoochris/artex-global
-gh repo set-default --view   # jiwoochris/artex-global 가 보이는지 확인
+gh repo set-default jclab-oss/artex-plane
+gh repo set-default --view   # jclab-oss/artex-plane 가 보이는지 확인
 ```
 
 ### 8.2 문서의 외부 링크는 브라우저처럼 GET 으로 확인합니다
@@ -358,7 +358,7 @@ git push origin v0.3.15
 - **release.** 모든 zip 을 모아 `SHA256SUMS` 체크섬을 만들고, GitHub Release 를 생성해 zip 과
   체크섬을 첨부합니다.
 - **docker.** binaries 가 교차 컴파일한 linux 바이너리를 받아 멀티아키텍처(amd64·arm64) 이미지를
-  빌드하고 GitHub Container Registry 의 `ghcr.io/jiwoochris/artex-global` 에 릴리스 태그와 `latest`
+  빌드하고 GitHub Container Registry 의 `ghcr.io/jclab-oss/artex-plane` 에 릴리스 태그와 `latest`
   로 올립니다. 로그인은 워크플로 기본 `GITHUB_TOKEN`(잡 권한 `packages: write`)으로 하므로 따로
   둘 시크릿이 없습니다.
 
@@ -384,7 +384,7 @@ git push origin v0.3.15
 
 ### 9.4 Docker 이미지 네임스페이스
 
-이미지는 이 포크가 소유한 `ghcr.io/jiwoochris/artex-global` 로 발행하고, `docker-compose.yml` 도 이
+이미지는 이 포크가 소유한 `ghcr.io/jclab-oss/artex-plane` 로 발행하고, `docker-compose.yml` 도 이
 이미지를 받습니다(2026-10-11 결정, `work/DECISIONS-FOR-JIWOO.md` 8번 항목). 상류의
 `autumn27/artex` 는 Docker Hub 에서 내려갔고 이 포크에는 push 권한도 없어 쓰지 않습니다.
 GHCR 패키지는 처음 발행될 때 비공개로 만들어질 수 있으니, 첫 릴리스 뒤 패키지 설정에서 공개

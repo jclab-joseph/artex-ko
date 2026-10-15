@@ -1,4 +1,4 @@
-// 지원 locale 과 기본값. artex-global 은 영어를 기본으로 하고, 한국어·중국어·스페인어·일본어를
+// 지원 locale 과 기본값. artex-plane 은 영어를 기본으로 하고, 한국어·중국어·스페인어·일본어를
 // 더해 다섯 언어를 사용자 설정으로 전환할 수 있다. 중국어("zh")는 상류 원문 대조용으로도 함께 둔다.
 export const LOCALES = ["en", "ko", "zh", "es", "ja"] as const;
 export type Locale = (typeof LOCALES)[number];

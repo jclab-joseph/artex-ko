@@ -14,10 +14,10 @@ description: |
     guard's wider DROP set (INDEX/VIEW/USER/ROLE/TABLESPACE), which alter structure or access
     rather than destroy data and are noisy in routine migrations.
 references:
-    - https://github.com/jiwoochris/artex-global/blob/main/docs/defense-ko.md
-    - https://github.com/jiwoochris/artex-global/blob/main/docs/defense-en.md
-    - https://github.com/jiwoochris/artex-global
-author: artex-global defense guide
+    - https://github.com/jclab-oss/artex-plane/blob/main/docs/defense-ko.md
+    - https://github.com/jclab-oss/artex-plane/blob/main/docs/defense-en.md
+    - https://github.com/jclab-oss/artex-plane
+author: artex-plane defense guide
 date: 2026-10-05
 tags:
     - attack.impact

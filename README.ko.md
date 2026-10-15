@@ -8,7 +8,7 @@
 
 한국어 · [中文](README.zh.md) · [English](README.md) · [Español](README.es.md) · [日本語](README.ja.md)
 
-[![ci](https://github.com/jiwoochris/artex-global/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/jiwoochris/artex-global/actions/workflows/ci.yml) [![detections](https://github.com/jiwoochris/artex-global/actions/workflows/detections.yml/badge.svg?branch=main)](https://github.com/jiwoochris/artex-global/actions/workflows/detections.yml) [![web](https://github.com/jiwoochris/artex-global/actions/workflows/web.yml/badge.svg?branch=main)](https://github.com/jiwoochris/artex-global/actions/workflows/web.yml) [![license: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
+[![ci](https://github.com/jclab-oss/artex-plane/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/jclab-oss/artex-plane/actions/workflows/ci.yml) [![detections](https://github.com/jclab-oss/artex-plane/actions/workflows/detections.yml/badge.svg?branch=main)](https://github.com/jclab-oss/artex-plane/actions/workflows/detections.yml) [![web](https://github.com/jclab-oss/artex-plane/actions/workflows/web.yml/badge.svg?branch=main)](https://github.com/jclab-oss/artex-plane/actions/workflows/web.yml) [![license: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 
 </div>
 
@@ -97,11 +97,11 @@ ARTEX 는 **자신이 소유하거나 서면으로 명시적 허가를 받은 �
 
 > **사전 요구:** Docker 와 Docker Compose. 데이터베이스는 **PostgreSQL** 이며 compose 가 함께 띄웁니다. 탐색에는 **LLM** 이 필요합니다(`ANTHROPIC_API_KEY` 또는 `OPENAI_API_KEY`, UI 에서도 설정 가능).
 
-> **이미지:** `docker-compose.yml` 의 `artex` 서비스는 이 저장소가 릴리스 태그(`v*`)마다 GitHub Container Registry 에 발행하는 글로벌판 이미지 `ghcr.io/jiwoochris/artex-global` 를 받습니다. 기본 태그는 `latest`(가장 최근 릴리스)이고, `.env` 의 `ARTEX_TAG` 로 특정 릴리스에 고정할 수 있습니다. 원본 저장소의 이미지 `autumn27/artex` 는 Docker Hub 에서 내려가 더는 쓰지 않습니다.
+> **이미지:** `docker-compose.yml` 의 `artex` 서비스는 이 저장소가 릴리스 태그(`v*`)마다 GitHub Container Registry 에 발행하는 글로벌판 이미지 `ghcr.io/jclab-oss/artex-plane` 를 받습니다. 기본 태그는 `latest`(가장 최근 릴리스)이고, `.env` 의 `ARTEX_TAG` 로 특정 릴리스에 고정할 수 있습니다. 원본 저장소의 이미지 `autumn27/artex` 는 Docker Hub 에서 내려가 더는 쓰지 않습니다.
 
 ```bash
-git clone https://github.com/jiwoochris/artex-global.git
-cd artex-global
+git clone https://github.com/jclab-oss/artex-plane.git
+cd artex-plane
 cp .env.example .env          # POSTGRES_PASSWORD 설정, ANTHROPIC_API_KEY 는 선택
 docker compose up -d          # artex 이미지 + postgres 를 함께 기동
 # → http://localhost:8787 접속 (처음 들어가면 /setup 에서 관리자 비밀번호 설정)
@@ -114,7 +114,7 @@ docker compose up -d          # artex 이미지 + postgres 를 함께 기동
 
 원본 저장소는 설치 스크립트(`./install.sh`), 사전 컴파일 바이너리(Releases), 소스 단일 바이너리 컴파일 등 여러 방법을 제공합니다. 명령과 절차는 [`README.zh.md`](README.zh.md#安装)의 "安装"(설치) 절에 정리되어 있으며, 아래 핵심만 옮깁니다.
 
-- **설치 스크립트:** `./install.sh` 를 실행하면 Docker 감지·설치 후 "① 전부 Docker" 또는 "② 로컬 컴파일 실행"을 고르게 합니다. "① 전부 Docker" 는 위 빠른 시작과 같은 이미지(`ghcr.io/jiwoochris/artex-global`)를 받아 기동하고, "② 로컬 컴파일 실행"은 아래 **소스에서 단일 바이너리 컴파일**과 같은 방식으로 직접 빌드합니다.
+- **설치 스크립트:** `./install.sh` 를 실행하면 Docker 감지·설치 후 "① 전부 Docker" 또는 "② 로컬 컴파일 실행"을 고르게 합니다. "① 전부 Docker" 는 위 빠른 시작과 같은 이미지(`ghcr.io/jclab-oss/artex-plane`)를 받아 기동하고, "② 로컬 컴파일 실행"은 아래 **소스에서 단일 바이너리 컴파일**과 같은 방식으로 직접 빌드합니다.
 - **소스에서 단일 바이너리 컴파일:**
 
   ```bash
