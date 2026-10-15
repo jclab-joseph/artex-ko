@@ -360,6 +360,22 @@
       "updatedWithReopened": "LLM configuration updated and {count} intents blocked by quota overrun recovered",
       "updateFailed": "Update failed: {message}"
     },
+    "runWindow": {
+      "controlAria": "Run window settings",
+      "title": "Run window",
+      "description": "The task only runs during the allowed hours in the chosen timezone. Outside the window it is paused automatically and resumes when the window opens (applied within ~5s).",
+      "none": "No limit",
+      "enable": "Restrict to a run window",
+      "start": "Start time",
+      "end": "End time",
+      "timezone": "Timezone",
+      "note": "If the start is later than the end, the window wraps past midnight (e.g. 22:00–06:00). If a time limit is also set, paused time still counts toward the limit.",
+      "equalError": "The start and end times must differ",
+      "close": "Close",
+      "save": "Save",
+      "updated": "Run window updated",
+      "updateFailed": "Update failed: {message}"
+    },
     "coverageGraph": {
       "kind": {
         "company": "Company",
@@ -2735,6 +2751,13 @@
       "seedHint": "When on, right after creation it dispatches \"description + goal\" as a single intent so the worker starts immediately without waiting for the first planning round; when it finishes, the planner takes over to assess and follow up. Recommended for cases usually solved by a single work, like CTF; when off, it follows the standard flow of planning first, then executing.",
       "coverageLabel": "Asset coverage feature",
       "coverageHint": "On by default. It calculates and displays test coverage, shows testing progress on the situation map, and automatically accumulates the tested scope. When off, coverage is no longer calculated or displayed, the situation map shows only assets without progress, and the agent no longer receives scope-related tools. Turning it off does not affect \"Linked company asset scope\".",
+      "runWindowLabel": "Run window",
+      "runWindowHint": "When on, the task only runs during the allowed hours in the chosen timezone. Outside the window it is paused automatically and resumes when the window opens.",
+      "runWindowStart": "Start time",
+      "runWindowEnd": "End time",
+      "runWindowTz": "Timezone",
+      "runWindowTimeoutNote": "If the start is later than the end, the window wraps past midnight (e.g. 22:00–06:00). If a time limit is also set, paused time still counts toward the limit.",
+      "runWindowEqualError": "The run window start and end times must differ",
       "cancel": "Cancel",
       "creating": "Creating",
       "create": "Create",

@@ -51,6 +51,7 @@ func (sc *Scheduler) Run(ctx context.Context) {
 			return
 		case <-t.C:
 			sc.s.reconcileConcurrency() // concurrency cap: when a slot opens, start a queued task to fill it
+			sc.s.reconcileRunWindows()  // per-task run window: pause outside the window, resume inside it
 			sc.step()
 		}
 	}

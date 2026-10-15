@@ -39,6 +39,12 @@ export interface Task {
   archive_blocked_by_task_id?: string; // live direct dependent that must be archived first
   company_ids?: number[]; // associated company scopes; current company assets join the task at creation
   coverage_enabled?: boolean; // asset-coverage feature toggle (set at creation, default on); false = don't compute/show coverage
+  // Per-task run window ("작업 시간대"): the task only runs during [start,end) minutes-from-midnight in run_window_tz
+  // (IANA zone). Empty run_window_tz = no window. run_window_paused = the current pause was initiated by the window sweep.
+  run_window_tz?: string;
+  run_window_start_min?: number;
+  run_window_end_min?: number;
+  run_window_paused?: boolean;
 }
 
 export interface TaskCategory {

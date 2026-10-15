@@ -50,6 +50,13 @@ type Task struct {
 	// list_untested_assets, and no coverage block is injected into the situation report (the scope field is still kept). Company attribution
 	// (task_scope kind=company) is independent of this switch and is never affected. See db/task_scope.go.
 	CoverageEnabled bool `json:"coverage_enabled"`
+	// Per-task run window ("작업 시간대"): the task only runs during RunWindowStartMin..RunWindowEndMin
+	// (minutes from midnight) in RunWindowTZ (IANA zone). Empty RunWindowTZ = no window. StartMin>EndMin
+	// wraps past midnight. RunWindowPaused marks a pause the window sweep initiated (only those auto-resume).
+	RunWindowTZ       string `json:"run_window_tz,omitempty"`
+	RunWindowStartMin int    `json:"run_window_start_min"`
+	RunWindowEndMin   int    `json:"run_window_end_min"`
+	RunWindowPaused   bool   `json:"run_window_paused"`
 }
 
 // TaskDeleteResult reports optional related-data cleanup performed in the same
@@ -156,6 +163,11 @@ type TaskCreateOptions struct {
 	CoverageEnabled *bool
 	// InterceptRules are task-level asset intercept rules, written into task_intercept_rules in the same transaction as the task on creation.
 	InterceptRules []TaskInterceptRuleInput
+	// Per-task run window ("작업 시간대"). Empty RunWindowTZ = no window. Validated by the caller
+	// (server.ValidateRunWindow) before reaching here.
+	RunWindowTZ       string
+	RunWindowStartMin int
+	RunWindowEndMin   int
 }
 
 // CreateTaskWithOptions creates an exploration, task, direct source relations,
@@ -223,12 +235,15 @@ VALUES ($1, 'fact', $2, 0, 'origin', 'system')`, expID, string(originPayload)); 
 		SourceTaskIDs:  append([]int64(nil), opts.SourceTaskIDs...),
 		CompanyIDs:     append([]int64(nil), opts.CompanyIDs...),
 		TimeoutSeconds: opts.TimeoutSeconds, PlanHeartbeatSeconds: opts.PlanHeartbeatSeconds,
-		CoverageEnabled: coverageEnabled,
+		CoverageEnabled:   coverageEnabled,
+		RunWindowTZ:       opts.RunWindowTZ,
+		RunWindowStartMin: opts.RunWindowStartMin,
+		RunWindowEndMin:   opts.RunWindowEndMin,
 	}
 	if err := tx.QueryRow(`
-INSERT INTO tasks(name, category_id, description, goal, exploration_id, llm_profile_id, active_llm_profile_id, timeout_seconds, plan_heartbeat_seconds, coverage_enabled)
-VALUES ($1,$2,$3,$4,$5,$6,$6,$7,$8,$9)
-RETURNING id, status, paused, created_at`, opts.Name, opts.CategoryID, description, goal, expID, active, opts.TimeoutSeconds, opts.PlanHeartbeatSeconds, coverageEnabled).Scan(&t.ID, &t.Status, &t.Paused, &t.CreatedAt); err != nil {
+INSERT INTO tasks(name, category_id, description, goal, exploration_id, llm_profile_id, active_llm_profile_id, timeout_seconds, plan_heartbeat_seconds, coverage_enabled, run_window_tz, run_window_start_min, run_window_end_min)
+VALUES ($1,$2,$3,$4,$5,$6,$6,$7,$8,$9,$10,$11,$12)
+RETURNING id, status, paused, created_at`, opts.Name, opts.CategoryID, description, goal, expID, active, opts.TimeoutSeconds, opts.PlanHeartbeatSeconds, coverageEnabled, opts.RunWindowTZ, opts.RunWindowStartMin, opts.RunWindowEndMin).Scan(&t.ID, &t.Status, &t.Paused, &t.CreatedAt); err != nil {
 		return nil, err
 	}
 	if err := insertTaskRelations(tx, t.ID, opts.SourceTaskIDs); err != nil {
@@ -344,11 +359,11 @@ func insertTaskLLMProfiles(tx *sql.Tx, taskID int64, profileIDs []int64) error {
 
 const taskCols = `id, COALESCE(name,''), category_id,
 COALESCE((SELECT category.name FROM task_categories category WHERE category.id=tasks.category_id),''),
-description, goal, exploration_id, status, paused, queued, queued_at, COALESCE(queue_mode,''), llm_profile_id, active_llm_profile_id, COALESCE(parent_ref,''), pinned_at, created_at, completed_at, COALESCE(timeout_seconds,0), COALESCE(plan_heartbeat_seconds,300), COALESCE(coverage_enabled,true), first_run_at, deadline_at`
+description, goal, exploration_id, status, paused, queued, queued_at, COALESCE(queue_mode,''), llm_profile_id, active_llm_profile_id, COALESCE(parent_ref,''), pinned_at, created_at, completed_at, COALESCE(timeout_seconds,0), COALESCE(plan_heartbeat_seconds,300), COALESCE(coverage_enabled,true), first_run_at, deadline_at, COALESCE(run_window_tz,''), COALESCE(run_window_start_min,0), COALESCE(run_window_end_min,0), COALESCE(run_window_paused,false)`
 
 func scanTask(sc interface{ Scan(...any) error }) (*Task, error) {
 	var t Task
-	if err := sc.Scan(&t.ID, &t.Name, &t.CategoryID, &t.CategoryName, &t.Description, &t.Goal, &t.ExplorationID, &t.Status, &t.Paused, &t.Queued, &t.QueuedAt, &t.QueueMode, &t.LLMProfileID, &t.ActiveLLMProfileID, &t.ParentRef, &t.PinnedAt, &t.CreatedAt, &t.CompletedAt, &t.TimeoutSeconds, &t.PlanHeartbeatSeconds, &t.CoverageEnabled, &t.FirstRunAt, &t.DeadlineAt); err != nil {
+	if err := sc.Scan(&t.ID, &t.Name, &t.CategoryID, &t.CategoryName, &t.Description, &t.Goal, &t.ExplorationID, &t.Status, &t.Paused, &t.Queued, &t.QueuedAt, &t.QueueMode, &t.LLMProfileID, &t.ActiveLLMProfileID, &t.ParentRef, &t.PinnedAt, &t.CreatedAt, &t.CompletedAt, &t.TimeoutSeconds, &t.PlanHeartbeatSeconds, &t.CoverageEnabled, &t.FirstRunAt, &t.DeadlineAt, &t.RunWindowTZ, &t.RunWindowStartMin, &t.RunWindowEndMin, &t.RunWindowPaused); err != nil {
 		return nil, err
 	}
 	t.Pinned = t.PinnedAt != nil
@@ -358,6 +373,26 @@ func scanTask(sc interface{ Scan(...any) error }) (*Task, error) {
 // SetParentRef records a task's parent task id (orchestration agent spawn_task link).
 func (d *DB) SetParentRef(id int64, parentRef string) error {
 	_, err := d.Exec(`UPDATE tasks SET parent_ref=NULLIF($2,'') WHERE id=$1`, id, parentRef)
+	return err
+}
+
+// SetTaskRunWindow persists a task's run window ("작업 시간대"). Empty tz clears the
+// window (feature off) and also clears run_window_paused so a previously
+// window-paused task is no longer treated as window-managed. Validate with
+// server.ValidateRunWindow before calling.
+func (d *DB) SetTaskRunWindow(id int64, tz string, startMin, endMin int) error {
+	if tz == "" {
+		_, err := d.Exec(`UPDATE tasks SET run_window_tz='', run_window_start_min=0, run_window_end_min=0, run_window_paused=false WHERE id=$1`, id)
+		return err
+	}
+	_, err := d.Exec(`UPDATE tasks SET run_window_tz=$2, run_window_start_min=$3, run_window_end_min=$4 WHERE id=$1`, id, tz, startMin, endMin)
+	return err
+}
+
+// SetTaskRunWindowPaused marks whether the task's current pause was initiated by the
+// run-window sweep. Only window-initiated pauses are auto-resumed when the window reopens.
+func (d *DB) SetTaskRunWindowPaused(id int64, paused bool) error {
+	_, err := d.Exec(`UPDATE tasks SET run_window_paused=$2 WHERE id=$1`, id, paused)
 	return err
 }
 

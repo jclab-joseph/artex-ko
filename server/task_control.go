@@ -158,6 +158,14 @@ func (s *Server) applyTaskControlWithCause(t *Task, action string, pauseCause er
 		if err != nil {
 			return out, err
 		}
+		// A manual resume is not window-managed: clear the flag so the run-window sweep
+		// won't later treat this as its own pause. (If the window is still closed, the
+		// sweep re-pauses it within one tick — the window stays authoritative.)
+		if t.lifecycleSnapshot().RunWindowPaused {
+			if err := s.m.SetTaskRunWindowPaused(t.ID, false); err != nil {
+				log.Printf("[run-window] task %s failed to clear window-paused on manual resume: %v", t.ID, err)
+			}
+		}
 		out.Queued = queued
 		out.Status = map[bool]string{true: "queued", false: "running"}[queued]
 	default:

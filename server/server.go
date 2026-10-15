@@ -372,6 +372,7 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 	s.initAgentControl(ctx, dataDir) // execution-plane split: CA, agent registry, listener, engine binding
 	s.restoreTaskRuntimes()
 	go s.reconcileConcurrency()
+	go s.reconcileRunWindows() // per-task run window: re-evaluate pause/resume immediately on boot (the 5s scheduler tick also drives it)
 	s.startTaskArchiveWorker()
 	s.wireInterceptReviewer() // LLM fallback review: commands that match no intercept rule are judged by the model
 	return s
@@ -845,6 +846,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/tasks/{id}/constraints/{cid}", s.deleteConstraint) // constraint management: delete a constraint
 	mux.HandleFunc("POST /api/tasks/{id}/control", s.control)
 	mux.HandleFunc("PUT /api/tasks/{id}/llm", s.updateTaskLLMProfiles)
+	mux.HandleFunc("PUT /api/tasks/{id}/run-window", s.updateTaskRunWindow)
 	mux.HandleFunc("GET /api/tasks/{id}/llm/resolution", s.taskLLMResolutionHandler)
 	mux.HandleFunc("POST /api/tasks/{id}/intents/{iid}/control", s.controlIntent)
 	mux.HandleFunc("POST /api/tasks/{id}/intents/{iid}/messages", s.sendWorkerMessage)
@@ -1595,6 +1597,12 @@ type createTaskReq struct {
 	AgentID string `json:"agent_id,omitempty"`
 	// InterceptRules task-level asset intercept/allow rules (entered at creation, stored in task_intercept_rules, not in the global table).
 	InterceptRules []taskInterceptRuleReq `json:"intercept_rules,omitempty"`
+	// Per-task run window ("작업 시간대"): the task only runs during RunWindowStartMin..RunWindowEndMin
+	// (minutes from midnight) in RunWindowTZ (IANA zone, e.g. "Asia/Seoul"). Empty tz = no window.
+	// StartMin>EndMin wraps past midnight. Outside the window the scheduler auto-pauses the task.
+	RunWindowTZ       string `json:"run_window_tz,omitempty"`
+	RunWindowStartMin int    `json:"run_window_start_min,omitempty"`
+	RunWindowEndMin   int    `json:"run_window_end_min,omitempty"`
 }
 
 func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
@@ -1615,6 +1623,11 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.TimeoutSeconds < 0 {
 		req.TimeoutSeconds = 0
+	}
+	req.RunWindowTZ = strings.TrimSpace(req.RunWindowTZ)
+	if err := ValidateRunWindow(req.RunWindowTZ, req.RunWindowStartMin, req.RunWindowEndMin); err != nil {
+		writeErr(w, 400, "invalid run window: "+err.Error())
+		return
 	}
 	if len(req.SourceTaskIDs) > db.MaxTaskSourceCount {
 		writeErr(w, 400, fmt.Sprintf(trMsg(errCreateTaskSourceLimit), db.MaxTaskSourceCount))
@@ -1650,8 +1663,11 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		Name: strings.TrimSpace(req.Name), CategoryID: req.CategoryID,
 		SourceTaskIDs: sourceIDs, CompanyIDs: req.CompanyIDs, LLMProfileIDs: req.LLMProfileIDs,
 		TimeoutSeconds: req.TimeoutSeconds, PlanHeartbeatSeconds: req.PlanHeartbeatSeconds,
-		CoverageEnabled: req.CoverageEnabled,
-		InterceptRules:  interceptRules,
+		CoverageEnabled:   req.CoverageEnabled,
+		InterceptRules:    interceptRules,
+		RunWindowTZ:       req.RunWindowTZ,
+		RunWindowStartMin: req.RunWindowStartMin,
+		RunWindowEndMin:   req.RunWindowEndMin,
 	})
 	if err != nil {
 		if errors.Is(err, db.ErrTaskCategoryInvalid) || errors.Is(err, db.ErrTaskCategoryNotFound) {
@@ -1685,6 +1701,51 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 	// and does not block the UI — goal decomposition proceeds visibly in the background.
 	s.launchTask(t, req.Description+" "+req.Goal, req.SeedFirstIntent != nil && *req.SeedFirstIntent)
 	writeJSON(w, 201, taskDTO(t, s.resolvedTaskStatus(t)))
+}
+
+// updateTaskRunWindow sets, changes, or clears a task's run window ("작업 시간대") after
+// creation. An empty tz clears the window. The change takes effect on the next sweep
+// (within ~5s): reconcileRunWindows will pause the task if it is now outside the window,
+// or resume a window-paused task if it is now inside / the window was cleared. A kicked
+// sweep runs immediately for responsiveness.
+func (s *Server) updateTaskRunWindow(w http.ResponseWriter, r *http.Request) {
+	t, ok := s.m.Task(r.PathValue("id"))
+	if !ok {
+		writeErr(w, 404, "task not found")
+		return
+	}
+	var req struct {
+		RunWindowTZ       string `json:"run_window_tz"`
+		RunWindowStartMin int    `json:"run_window_start_min"`
+		RunWindowEndMin   int    `json:"run_window_end_min"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, 400, "bad json: "+err.Error())
+		return
+	}
+	req.RunWindowTZ = strings.TrimSpace(req.RunWindowTZ)
+	if err := ValidateRunWindow(req.RunWindowTZ, req.RunWindowStartMin, req.RunWindowEndMin); err != nil {
+		writeErr(w, 400, "invalid run window: "+err.Error())
+		return
+	}
+	// Capture window-paused state before the update, because clearing the window also
+	// clears the window-paused flag — we still need to know to release the task.
+	before := t.lifecycleSnapshot()
+	if err := s.m.SetTaskRunWindow(t.ID, req.RunWindowTZ, req.RunWindowStartMin, req.RunWindowEndMin); err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	// Clearing the window should promptly release a task parked by the sweep: if it was
+	// window-paused, resume it now rather than waiting for the next tick. (A still-open
+	// or still-closed window is otherwise reconciled by the kicked sweep below.)
+	if req.RunWindowTZ == "" && before.Paused && before.RunWindowPaused {
+		if _, err := s.admitPausedTask(t); err != nil {
+			log.Printf("[run-window] task %s failed to resume after clearing its window: %v", t.ID, err)
+		}
+	}
+	go s.reconcileRunWindows()
+	log.Printf("[task] #%s run window updated (tz=%q %d-%d)", t.ID, req.RunWindowTZ, req.RunWindowStartMin, req.RunWindowEndMin)
+	writeJSON(w, 200, taskDTO(t, s.resolvedTaskStatus(t)))
 }
 
 func (s *Server) validateTaskProfileIDs(ids []int64) error {

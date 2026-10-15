@@ -55,16 +55,22 @@ type Task struct {
 	CompanyIDs         []int64 `json:"company_ids,omitempty"`
 	Status             string  `json:"status"` // persisted lifecycle status (done/failed/timeout are terminal; empty/other is derived from the runtime state)
 	// Task-level timeout (see docs/task-timeout-and-settlement-design.md). DeadlineAt/FirstRunAt are unix seconds, 0 = unset/not run.
-	TimeoutSeconds       int                    `json:"timeout_seconds"`
-	PlanHeartbeatSeconds int                    `json:"plan_heartbeat_seconds"` // planner heartbeat trigger interval (seconds)
-	CoverageEnabled      bool                   `json:"coverage_enabled"`       // asset coverage feature toggle (fixed at creation, default on)
-	FirstRunAt           int64                  `json:"first_run_at,omitempty"`
-	DeadlineAt           int64                  `json:"deadline_at,omitempty"`
-	Store                *pgdb.ExplorationStore `json:"-"`
-	Guard                *guard.Guard           `json:"-"`
-	notify               chan struct{}
-	lifecycleMu          sync.RWMutex
-	llmMu                sync.RWMutex
+	TimeoutSeconds       int   `json:"timeout_seconds"`
+	PlanHeartbeatSeconds int   `json:"plan_heartbeat_seconds"` // planner heartbeat trigger interval (seconds)
+	CoverageEnabled      bool  `json:"coverage_enabled"`       // asset coverage feature toggle (fixed at creation, default on)
+	FirstRunAt           int64 `json:"first_run_at,omitempty"`
+	DeadlineAt           int64 `json:"deadline_at,omitempty"`
+	// Per-task run window ("작업 시간대"): the task only runs during RunWindowStartMin..RunWindowEndMin
+	// (minutes from midnight) in RunWindowTZ (IANA zone). Empty RunWindowTZ = no window. See server/runwindow.go.
+	RunWindowTZ       string                 `json:"run_window_tz,omitempty"`
+	RunWindowStartMin int                    `json:"run_window_start_min,omitempty"`
+	RunWindowEndMin   int                    `json:"run_window_end_min,omitempty"`
+	RunWindowPaused   bool                   `json:"run_window_paused,omitempty"`
+	Store             *pgdb.ExplorationStore `json:"-"`
+	Guard             *guard.Guard           `json:"-"`
+	notify            chan struct{}
+	lifecycleMu       sync.RWMutex
+	llmMu             sync.RWMutex
 
 	// pendingTriggers accumulates the concrete changes (worker done / finding) that
 	// fired planning rounds since the last one consumed them. The debounce coalesces
@@ -92,6 +98,11 @@ type taskLifecycleState struct {
 	CompanyIDs    []int64
 	CategoryID    *int64
 	CategoryName  string
+	// Per-task run window ("작업 시간대"). RunWindowTZ=="" means no window.
+	RunWindowTZ       string
+	RunWindowStartMin int
+	RunWindowEndMin   int
+	RunWindowPaused   bool
 }
 
 func (t *Task) lifecycleSnapshot() taskLifecycleState {
@@ -119,6 +130,11 @@ func (t *Task) lifecycleSnapshotLocked() taskLifecycleState {
 		CompanyIDs:    append([]int64(nil), t.CompanyIDs...),
 		CategoryID:    cloneInt64Ptr(t.CategoryID),
 		CategoryName:  t.CategoryName,
+
+		RunWindowTZ:       t.RunWindowTZ,
+		RunWindowStartMin: t.RunWindowStartMin,
+		RunWindowEndMin:   t.RunWindowEndMin,
+		RunWindowPaused:   t.RunWindowPaused,
 	}
 }
 
@@ -143,6 +159,10 @@ func (t *Task) updateLifecycle(update func(*taskLifecycleState)) {
 	t.CompanyIDs = append(t.CompanyIDs[:0], state.CompanyIDs...)
 	t.CategoryID = cloneInt64Ptr(state.CategoryID)
 	t.CategoryName = state.CategoryName
+	t.RunWindowTZ = state.RunWindowTZ
+	t.RunWindowStartMin = state.RunWindowStartMin
+	t.RunWindowEndMin = state.RunWindowEndMin
+	t.RunWindowPaused = state.RunWindowPaused
 	t.lifecycleMu.Unlock()
 }
 
@@ -871,7 +891,11 @@ func taskFromPG(pt *pgdb.Task, store *pgdb.ExplorationStore, ic *intercept.Inter
 		TimeoutSeconds: pt.TimeoutSeconds, PlanHeartbeatSeconds: pt.PlanHeartbeatSeconds,
 		CoverageEnabled: pt.CoverageEnabled,
 		FirstRunAt:      unixOrZero(pt.FirstRunAt), DeadlineAt: unixOrZero(pt.DeadlineAt),
-		Store: store, Guard: guard.NewWithInterceptor(ic), notify: make(chan struct{}, 1),
+		RunWindowTZ:       pt.RunWindowTZ,
+		RunWindowStartMin: pt.RunWindowStartMin,
+		RunWindowEndMin:   pt.RunWindowEndMin,
+		RunWindowPaused:   pt.RunWindowPaused,
+		Store:             store, Guard: guard.NewWithInterceptor(ic), notify: make(chan struct{}, 1),
 	}
 }
 
@@ -1284,6 +1308,54 @@ func (m *Manager) ApplyTaskPause(id string) error {
 			state.QueuedAt = 0
 			state.QueueMode = mode
 		})
+	}
+	m.mu.Unlock()
+	return nil
+}
+
+// SetTaskRunWindow persists a task's run window ("작업 시간대") and syncs the in-memory
+// handle. Empty tz clears the window (and its paused flag). Validate with
+// server.ValidateRunWindow before calling.
+func (m *Manager) SetTaskRunWindow(id, tz string, startMin, endMin int) error {
+	m.taskStateMu.Lock()
+	defer m.taskStateMu.Unlock()
+	n, err := strconv.ParseInt(id, 10, 64)
+	if err != nil {
+		return err
+	}
+	if err := m.pg.SetTaskRunWindow(n, tz, startMin, endMin); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	if t := m.tasks[id]; t != nil {
+		t.updateLifecycle(func(state *taskLifecycleState) {
+			state.RunWindowTZ = tz
+			state.RunWindowStartMin = startMin
+			state.RunWindowEndMin = endMin
+			if tz == "" {
+				state.RunWindowPaused = false
+			}
+		})
+	}
+	m.mu.Unlock()
+	return nil
+}
+
+// SetTaskRunWindowPaused records whether the task's current pause was initiated by
+// the run-window sweep (only those auto-resume) and syncs the in-memory handle.
+func (m *Manager) SetTaskRunWindowPaused(id string, paused bool) error {
+	m.taskStateMu.Lock()
+	defer m.taskStateMu.Unlock()
+	n, err := strconv.ParseInt(id, 10, 64)
+	if err != nil {
+		return err
+	}
+	if err := m.pg.SetTaskRunWindowPaused(n, paused); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	if t := m.tasks[id]; t != nil {
+		t.updateLifecycle(func(state *taskLifecycleState) { state.RunWindowPaused = paused })
 	}
 	m.mu.Unlock()
 	return nil

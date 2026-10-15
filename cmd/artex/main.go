@@ -16,6 +16,10 @@ import (
 	"runtime"
 	"syscall"
 	"time"
+	// Embed the IANA timezone database so per-task run windows (config.T / run-window
+	// feature) can resolve zones like "Asia/Seoul" even on minimal containers or
+	// Windows where the OS zoneinfo files are absent.
+	_ "time/tzdata"
 
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/agentctl"
