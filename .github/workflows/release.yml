@@ -75,6 +75,12 @@ jobs:
         with:
           name: bin-linux-${{ matrix.goarch }}
           path: dist/artex-linux-${{ matrix.goarch }}/artex
+      # 실행 플레인 분리용 Agent 바이너리도 같은 이미지에 함께 넣는다(역할은 런타임 command 로 선택).
+      - if: matrix.goos == 'linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bin-linux-agent-${{ matrix.goarch }}
+          path: dist/artex-linux-${{ matrix.goarch }}/artex-agent
 
   # ③ 모든 zip 을 모아 → GitHub Release 생성
   release:
@@ -117,6 +123,15 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: bin-linux-arm64
+          path: dist/arm64
+      # Agent 바이너리를 같은 아키텍처 디렉터리로 내려받아 artex 와 나란히 둔다(dist/<arch>/artex-agent).
+      - uses: actions/download-artifact@v4
+        with:
+          name: bin-linux-agent-amd64
+          path: dist/amd64
+      - uses: actions/download-artifact@v4
+        with:
+          name: bin-linux-agent-arm64
           path: dist/arm64
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3

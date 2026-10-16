@@ -32,11 +32,15 @@ RUN npm install -g @playwright/mcp@latest @playwright/cli@latest playwright@late
 WORKDIR /app
 # 미리 컴파일한 해당 아키텍처 바이너리(dist/amd64/artex 또는 dist/arm64/artex)
 COPY dist/${TARGETARCH}/artex /app/artex
+# 실행 플레인 분리용 Agent 바이너리도 같은 이미지에 넣는다. 한 이미지가 두 역할을 담고,
+# 역할은 실행 시 command 로 고른다(Management=기본 start.sh / Agent=artex-agent ...).
+# 분리 배포 시: 별도 샌드박스에서 이 이미지를 `artex-agent --bundle ...` 로 띄운다. 예시는 e2e/docker-compose.yml 참고.
+COPY dist/${TARGETARCH}/artex-agent /app/artex-agent
 # 감시 기동 스크립트: 프로세스 종료 후 종료 코드에 따라 다시 띄울지 결정하며, 화면의 원클릭 업데이트가 이 스크립트로 교체를 완료한다.
 # 이 스크립트는 동시에 SIGTERM 을 artex 로 전달하는 일도 맡는다: docker stop 은 신호를 PID 1 에만 보내므로,
 # 전달하지 않으면 artex 가 신호를 받지 못해 우아한 종료를 못 하고 10 초 뒤 SIGKILL 로 강제 종료된다.
 COPY start.sh /app/start.sh
-RUN chmod +x /app/artex /app/start.sh
+RUN chmod +x /app/artex /app/artex-agent /app/start.sh
 COPY skills/ /app/skills/
 # data/(SQLite + jwt.key) 영속화 지점
 VOLUME ["/app/data"]

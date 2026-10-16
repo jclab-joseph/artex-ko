@@ -163,8 +163,9 @@ compress_binary() {
 
 package_binary() {
   binary="$1"
-  goos="$2"
-  goarch="$3"
+  agent_binary="$2"
+  goos="$3"
+  goarch="$4"
   package_name="artex-${ARTEX_BUILD_VERSION}-${goos}-${goarch}"
   package_root="${ARTEX_PACKAGE_DIR}/${package_name}"
   archive="${ARTEX_PACKAGE_DIR}/${package_name}.zip"
@@ -173,6 +174,8 @@ package_binary() {
   rm -rf "$package_root" "$archive"
   mkdir -p "$package_root"
   cp "$binary" "$package_root/"
+  # 실행 플레인 분리(ARTEX_AGENT_OFFLOAD=require/pinned) 시 별도 샌드박스에서 실행하는 Agent 바이너리.
+  cp "$agent_binary" "$package_root/"
   # 데몬 시작 스크립트가 정식 진입점입니다. 화면의 원클릭 업데이트는 프로세스가 종료된 뒤 이 스크립트가 다시 띄워 줘야 동작하고,
   # artex 본체를 직접 실행하면 업데이트 후 다시 기동되지 않습니다. 대상 시스템에 맞는 한 벌만 포함합니다.
   if [ "$goos" = "windows" ]; then
@@ -203,13 +206,19 @@ build_target() {
   esac
 
   binary_name="artex"
-  [ "$goos" = "windows" ] && binary_name="artex.exe"
+  agent_name="artex-agent"
+  if [ "$goos" = "windows" ]; then
+    binary_name="artex.exe"
+    agent_name="artex-agent.exe"
+  fi
   if [ -n "${ARTEX_OUTPUT:-}" ] && [ "$ARTEX_RELEASE" != "1" ]; then
     output="$ARTEX_OUTPUT"
   else
     output="${ARTEX_OUTPUT_DIR}/artex-${goos}-${goarch}/${binary_name}"
   fi
   mkdir -p "$(dirname "$output")"
+  # 실행 플레인 분리용 Agent 바이너리는 artex 본체와 같은 디렉터리에 함께 둔다.
+  agent_output="$(dirname "$output")/${agent_name}"
 
   info "${goos}/${goarch} 컴파일, 버전 ${ARTEX_BUILD_VERSION}"
   GOSUMDB="$ARTEX_GOSUMDB" \
@@ -223,10 +232,24 @@ build_target() {
     -o "$output" \
     ./cmd/artex
 
+  # 샌드박스 실행 Agent(cmd/artex-agent): 프런트엔드를 내장하지 않으므로 embedui 태그가 필요 없다.
+  # 같은 버전 문자열을 주입하고, 순수 Go(CGO 비활성) 로 동일 대상에 크로스 컴파일한다.
+  info "${goos}/${goarch} Agent 컴파일, 버전 ${ARTEX_BUILD_VERSION}"
+  GOSUMDB="$ARTEX_GOSUMDB" \
+  CGO_ENABLED=0 \
+  GOOS="$goos" \
+  GOARCH="$goarch" \
+  go build \
+    -trimpath \
+    -ldflags "-s -w -buildid= -X main.version=${ARTEX_BUILD_VERSION}" \
+    -o "$agent_output" \
+    ./cmd/artex-agent
+
   compress_binary "$output" "$goos"
-  if command -v file >/dev/null 2>&1; then file "$output"; fi
-  if [ "$ARTEX_PACKAGE" = "1" ]; then package_binary "$output" "$goos" "$goarch"; fi
-  ok "컴파일 완료: $output"
+  compress_binary "$agent_output" "$goos"
+  if command -v file >/dev/null 2>&1; then file "$output" "$agent_output"; fi
+  if [ "$ARTEX_PACKAGE" = "1" ]; then package_binary "$output" "$agent_output" "$goos" "$goarch"; fi
+  ok "컴파일 완료: $output, $agent_output"
 }
 
 write_checksums() {
