@@ -121,6 +121,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ApiError, api } from "@/lib/api";
 import { getLocalStorageValue, setLocalStorageValue } from "@/lib/local-storage.client";
+import { hmToMin, runWindowTimeZones } from "@/lib/run-window";
 import { type SortDirection, useStoredSortPreference } from "@/lib/sort-preference";
 import type {
   AssetInterceptRuleInput,
@@ -3163,6 +3164,11 @@ function CreateTaskSheet({
   const [heartbeatMin, setHeartbeatMin] = React.useState("10"); // planner heartbeat (minutes); default 10, floor 10 (matches the backend)
   const [seedFirstIntent, setSeedFirstIntent] = React.useState(false); // seed an initial intent at creation so the worker starts right away without waiting for the first planner round; off by default, following the standard plan-then-execute flow
   const [coverageEnabled, setCoverageEnabled] = React.useState(true); // asset coverage feature; on by default. Off = don't compute/show coverage, don't accumulate scope, hide scope-related tools (company associations are unaffected)
+  // Per-task run window ("작업 시간대"): when enabled, the task only runs during [start,end) in the chosen timezone, auto-pausing outside it.
+  const [runWindowEnabled, setRunWindowEnabled] = React.useState(false);
+  const [runWindowStart, setRunWindowStart] = React.useState("01:00"); // "HH:MM" local to runWindowTz
+  const [runWindowEnd, setRunWindowEnd] = React.useState("06:00");
+  const [runWindowTz, setRunWindowTz] = React.useState("Asia/Seoul");
   const [interceptRules, setInterceptRules] = React.useState<AssetInterceptRuleInput[]>([]); // task-level asset intercept rules (apply to this task only, not written to the global table)
   // Execution-plane split: when offload is on (esp. "pinned"), a task is bound to a
   // sandbox Agent here. Empty in off mode (no picker shown).
@@ -3226,6 +3232,10 @@ function CreateTaskSheet({
       toast.error(t("create.validateSourceLimit", { max: MAX_SOURCE_TASKS }));
       return;
     }
+    if (runWindowEnabled && hmToMin(runWindowStart) === hmToMin(runWindowEnd)) {
+      toast.error(t("create.runWindowEqualError"));
+      return;
+    }
     setCreating(true);
     try {
       const timeoutSec = Math.max(0, Math.floor(Number(timeoutMin) || 0)) * 60;
@@ -3246,6 +3256,9 @@ function CreateTaskSheet({
         interceptRules: interceptRules
           .map((r) => ({ ...r, pattern: r.pattern.trim() }))
           .filter((r) => r.pattern !== ""),
+        runWindowTz: runWindowEnabled ? runWindowTz : "",
+        runWindowStartMin: runWindowEnabled ? hmToMin(runWindowStart) : 0,
+        runWindowEndMin: runWindowEnabled ? hmToMin(runWindowEnd) : 0,
       });
       toast.success(t("create.createdToast"));
       setName("");
@@ -3260,6 +3273,10 @@ function CreateTaskSheet({
       setHeartbeatMin("10");
       setSeedFirstIntent(false);
       setCoverageEnabled(true);
+      setRunWindowEnabled(false);
+      setRunWindowStart("01:00");
+      setRunWindowEnd("06:00");
+      setRunWindowTz("Asia/Seoul");
       setExecAgentID("");
       setInterceptRules([]);
       setUploadCount(0);
@@ -3489,6 +3506,65 @@ function CreateTaskSheet({
                     {t("create.coverageLabel")}
                   </label>
                   <p className="text-muted-foreground text-xs">{t("create.coverageHint")}</p>
+                </div>
+                <div className="grid gap-2">
+                  <label htmlFor="run-window-enabled" className="flex items-center gap-2 text-sm">
+                    <Checkbox
+                      id="run-window-enabled"
+                      checked={runWindowEnabled}
+                      onCheckedChange={(v) => setRunWindowEnabled(!!v)}
+                    />
+                    {t("create.runWindowLabel")}
+                  </label>
+                  <p className="text-muted-foreground text-xs">{t("create.runWindowHint")}</p>
+                  {runWindowEnabled && (
+                    <div className="grid gap-3 pt-1">
+                      <div className="flex flex-wrap items-end gap-3">
+                        <div className="grid gap-1">
+                          <Label htmlFor="run-window-start" className="text-xs">
+                            {t("create.runWindowStart")}
+                          </Label>
+                          <Input
+                            id="run-window-start"
+                            type="time"
+                            className="w-32"
+                            value={runWindowStart}
+                            onChange={(e) => setRunWindowStart(e.target.value)}
+                          />
+                        </div>
+                        <div className="grid gap-1">
+                          <Label htmlFor="run-window-end" className="text-xs">
+                            {t("create.runWindowEnd")}
+                          </Label>
+                          <Input
+                            id="run-window-end"
+                            type="time"
+                            className="w-32"
+                            value={runWindowEnd}
+                            onChange={(e) => setRunWindowEnd(e.target.value)}
+                          />
+                        </div>
+                      </div>
+                      <div className="grid gap-1">
+                        <Label htmlFor="run-window-tz" className="text-xs">
+                          {t("create.runWindowTz")}
+                        </Label>
+                        <Select value={runWindowTz} onValueChange={setRunWindowTz}>
+                          <SelectTrigger id="run-window-tz" className="w-full max-w-xs">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent className="max-h-72">
+                            {runWindowTimeZones().map((tz) => (
+                              <SelectItem key={tz} value={tz}>
+                                {tz}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <p className="text-muted-foreground text-xs">{t("create.runWindowTimeoutNote")}</p>
+                    </div>
+                  )}
                 </div>
               </CollapsibleContent>
             </Collapsible>

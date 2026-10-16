@@ -35,6 +35,8 @@ var (
 		"The task is being deleted (DELETE /api/tasks/{id}); the delete barrier cancelled this task's running Planner, Worker and main Agent; this run's result will no longer be used")
 	AbortPausedOnReload = cause("paused_on_reload", "backend restored the paused state",
 		"On startup the backend restored the task's pause from the state persisted in the database. This run was cancelled; normally no Agent is running during the recovery phase")
+	AbortPausedByRunWindow = cause("paused_by_run_window", "task is outside its allowed run window",
+		"The task has a per-task run window (allowed hours) and the current time is outside it, so the scheduler auto-paused it. This Planner/Worker run was cancelled deliberately; in-flight intents return to frontier(open) and are reclaimed and re-executed once the window reopens and the task auto-resumes")
 	AbortGoalMet = cause("goal_met", "planner judged the task goal met",
 		"The planner judged the task goal met and set the task to done, then cancelled the Workers still running; these intents are marked stopped rather than failed")
 	AbortSettleDrainTimeout = cause("settle_drain_timeout", "timeout settle-drain window exhausted",

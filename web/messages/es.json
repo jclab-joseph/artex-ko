@@ -360,6 +360,22 @@
       "updatedWithReopened": "Configuración de LLM actualizada; se recuperaron {count} intenciones bloqueadas por exceso de cuota",
       "updateFailed": "Error al actualizar: {message}"
     },
+    "runWindow": {
+      "controlAria": "Ajustes de la ventana de ejecución",
+      "title": "Ventana de ejecución",
+      "description": "La tarea solo se ejecuta durante las horas permitidas en la zona horaria elegida. Fuera de la ventana se pausa automáticamente y se reanuda cuando la ventana se abre (se aplica en ~5 s).",
+      "none": "Sin límite",
+      "enable": "Restringir a una ventana de ejecución",
+      "start": "Hora de inicio",
+      "end": "Hora de fin",
+      "timezone": "Zona horaria",
+      "note": "Si el inicio es posterior al fin, la ventana cruza la medianoche (p. ej. 22:00–06:00). Si también se define un límite de tiempo, el tiempo en pausa sigue contando para el límite.",
+      "equalError": "Las horas de inicio y de fin deben ser distintas",
+      "close": "Cerrar",
+      "save": "Guardar",
+      "updated": "Ventana de ejecución actualizada",
+      "updateFailed": "Error al actualizar: {message}"
+    },
     "coverageGraph": {
       "kind": {
         "company": "Empresa",
@@ -2735,6 +2751,13 @@
       "seedHint": "Cuando está activado, justo después de la creación envía «descripción + objetivo» como una sola intención para que el worker empiece de inmediato sin esperar a la primera ronda de planificación; al terminar, el planner toma el relevo para evaluar y complementar. Se recomienda para casos que suelen resolverse con un solo work, como CTF; cuando está desactivado, sigue el flujo estándar de planificar primero y ejecutar después.",
       "coverageLabel": "Función de cobertura de activos",
       "coverageHint": "Activado por defecto. Calcula y muestra la cobertura de pruebas, muestra el progreso de las pruebas en el mapa de situación y acumula automáticamente el alcance probado. Cuando está desactivado, la cobertura ya no se calcula ni se muestra, el mapa de situación muestra solo los activos sin el progreso, y el agent ya no recibe herramientas relacionadas con el alcance. Desactivarlo no afecta al «Alcance de activos de la empresa vinculada».",
+      "runWindowLabel": "Ventana de ejecución",
+      "runWindowHint": "Cuando está activada, la tarea solo se ejecuta durante las horas permitidas en la zona horaria elegida. Fuera de la ventana se pausa automáticamente y se reanuda cuando la ventana se abre.",
+      "runWindowStart": "Hora de inicio",
+      "runWindowEnd": "Hora de fin",
+      "runWindowTz": "Zona horaria",
+      "runWindowTimeoutNote": "Si el inicio es posterior al fin, la ventana cruza la medianoche (p. ej. 22:00–06:00). Si también se define un límite de tiempo, el tiempo en pausa sigue contando para el límite.",
+      "runWindowEqualError": "La hora de inicio y de fin de la ventana de ejecución deben ser distintas",
       "cancel": "Cancelar",
       "creating": "Creando",
       "create": "Crear",

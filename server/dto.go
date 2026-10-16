@@ -61,6 +61,11 @@ type TaskDTO struct {
 	ArchiveBlockedBy   string             `json:"archive_blocked_by_task_id,omitempty"`
 	CompanyIDs         []int64            `json:"company_ids"`
 	CoverageEnabled    bool               `json:"coverage_enabled"` // asset coverage feature toggle (fixed at creation)
+	// Per-task run window ("작업 시간대"). RunWindowTZ=="" means no window. Minutes from midnight.
+	RunWindowTZ       string `json:"run_window_tz"`
+	RunWindowStartMin int    `json:"run_window_start_min"`
+	RunWindowEndMin   int    `json:"run_window_end_min"`
+	RunWindowPaused   bool   `json:"run_window_paused"` // the current pause was initiated by the run-window sweep
 }
 
 // FindingSeverityDTO is the finding count bucketed by severity in the task list (critical/high/medium/low).
@@ -134,6 +139,10 @@ func taskDTO(t *Task, status string) TaskDTO {
 		SourceTaskIDs:      sourceIDs,
 		CompanyIDs:         lifecycle.CompanyIDs,
 		CoverageEnabled:    t.CoverageEnabled,
+		RunWindowTZ:        lifecycle.RunWindowTZ,
+		RunWindowStartMin:  lifecycle.RunWindowStartMin,
+		RunWindowEndMin:    lifecycle.RunWindowEndMin,
+		RunWindowPaused:    lifecycle.RunWindowPaused,
 	}
 }
 

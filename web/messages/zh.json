@@ -360,6 +360,22 @@
       "updatedWithReopened": "LLM 配置已更新，并恢复 {count} 条额度阻塞意图",
       "updateFailed": "更新失败：{message}"
     },
+    "runWindow": {
+      "controlAria": "运行时间窗设置",
+      "title": "运行时间窗",
+      "description": "任务仅在所选时区的允许时间内运行。时间窗之外会自动暂停，到点后自动恢复（约 5 秒内生效）。",
+      "none": "无限制",
+      "enable": "限制运行时间窗",
+      "start": "开始时间",
+      "end": "结束时间",
+      "timezone": "时区",
+      "note": "若开始晚于结束，则视为跨零点的时间段（例如 22:00–06:00）。若同时设置了「时间限制」，暂停的时间也会计入限额。",
+      "equalError": "开始和结束时间必须不同",
+      "close": "关闭",
+      "save": "保存",
+      "updated": "运行时间窗已更新",
+      "updateFailed": "更新失败：{message}"
+    },
     "coverageGraph": {
       "kind": {
         "company": "公司",
@@ -2735,6 +2751,13 @@
       "seedHint": "开启后创建即把「描述+目标」作为一条意图下发，worker 免等首轮规划直接开跑，跑完再由 planner 接手判定/补充。CTF 等常一个 work 直接解决的场景推荐开启；关闭则走标准的先规划再执行。",
       "coverageLabel": "资产覆盖度功能",
       "coverageHint": "默认开启：计算并展示测试覆盖度、态势图显示测试进度、自动累积测试范围。关闭后不再计算/展示覆盖度，态势图仅展示资产不显示进度，agent 也不再获得范围类工具。关闭不影响「关联企业资产范围」。",
+      "runWindowLabel": "运行时间窗",
+      "runWindowHint": "开启后，任务仅在所选时区的允许时间内运行。时间窗之外会自动暂停，到点后自动恢复。",
+      "runWindowStart": "开始时间",
+      "runWindowEnd": "结束时间",
+      "runWindowTz": "时区",
+      "runWindowTimeoutNote": "若开始晚于结束，则视为跨零点的时间段（例如 22:00–06:00）。若同时设置了「时间限制」，暂停的时间也会计入限额。",
+      "runWindowEqualError": "运行时间窗的开始和结束时间必须不同",
       "cancel": "取消",
       "creating": "创建中",
       "create": "创建",

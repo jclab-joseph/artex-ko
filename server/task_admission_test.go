@@ -121,6 +121,52 @@ func TestAdmissionDoesNotOverwriteConcurrentTerminalStatus(t *testing.T) {
 	}
 }
 
+func TestRestoreSkipsLoopForRunWindowParkedTask(t *testing.T) {
+	m, err := NewManager(t.TempDir(), "")
+	if err != nil {
+		t.Skipf("postgres unavailable (%v) - skipping", err)
+	}
+	defer m.Close()
+
+	// A task parked window-paused before its goals were ever decomposed: no goals,
+	// FirstRunAt==0, paused, run_window_paused. On restart its idle planner loop must
+	// NOT be restored — otherwise the bootstrap resume that reopens the window unpauses
+	// the restored loop, which settles the task to done before the first goal exists.
+	parked, err := m.CreateTask("parked", "outside the window at creation", nil, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = m.DeleteTask(parked.ID, DeleteTaskOptions{}) }()
+	if err := m.SetTaskRunWindow(parked.ID, "Asia/Seoul", 60, 360); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.ApplyTaskPause(parked.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.SetTaskRunWindowPaused(parked.ID, true); err != nil {
+		t.Fatal(err)
+	}
+
+	// Control: an ordinary non-paused task must still get its loop restored, so the
+	// skip above is specific to the parked-before-bootstrap case and does not strand
+	// live tasks (which would silently block the FIFO).
+	running, err := m.CreateTask("running", "already admitted before shutdown", nil, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = m.DeleteTask(running.ID, DeleteTaskOptions{}) }()
+
+	s := newAdmissionTestServer(m, nil)
+	s.restoreTaskRuntimes()
+
+	if s.engine.Started(parked.ID) {
+		t.Error("restored an idle planner loop for a window-parked, pre-bootstrap task — it can settle the task to done before goals exist")
+	}
+	if !s.engine.Started(running.ID) {
+		t.Error("did not restore the loop for an ordinary non-paused task")
+	}
+}
+
 func TestAdmitKeepsQueuedBootstrapMode(t *testing.T) {
 	m, err := NewManager(t.TempDir(), "")
 	if err != nil {

@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/db"
@@ -43,6 +44,9 @@ const (
 	queuedConcurrencyLimitSummaryFmt = "대기열 등록: 동시 실행 상한 %d개에 도달해, 빈자리가 나면 자동으로 시작합니다"
 	queuedNoLLMSummary               = "대기열 등록: 현재 실행 가능한 LLM 설정이 없어, 설정이 복구되면 자동으로 시작합니다"
 	queuedFIFOSummary                = "대기열 등록: 먼저 대기 중인 작업이 있어, FIFO 순서대로 자동으로 시작합니다"
+	// 작업 시간대(run window) 전환 시 전사에 표시되는 시스템 활동 요약. 제품 출력이므로 한국어로 둔다.
+	runWindowPausedSummaryFmt  = "작업 시간대(%s) 밖 — 일시정지 (시간대가 열리면 자동 재개)"
+	runWindowResumedSummaryFmt = "작업 시간대(%s) 진입 — 자동 재개"
 )
 
 func (s *Server) launchTask(t *Task, seedText string, seedFirstIntent bool) {
@@ -54,6 +58,13 @@ func (s *Server) launchTask(t *Task, seedText string, seedFirstIntent bool) {
 		s.seedFirstIntent(t)
 	}
 	s.engine.decInflight(t.ID)
+	// Per-task run window ("작업 시간대"): if the task may only run during a window and
+	// we are currently outside it, park it window-paused instead of starting. The window
+	// sweep resumes it (in bootstrap mode, so goal decomposition still happens) once the
+	// window opens. seed() above already set up the graph, which resume does not redo.
+	if s.parkIfOutsideRunWindow(t) {
+		return
+	}
 	if _, err := s.admitTask(t, "bootstrap"); err != nil {
 		log.Printf("[concurrency] task %s failed to start: %v", t.ID, err)
 	}
@@ -346,6 +357,13 @@ func (s *Server) reconcileConcurrency() {
 		if lifecycle.Paused || (enabled && !s.engine.ReadyFor(task)) {
 			continue
 		}
+		// Per-task run window: never promote (and thus start goal decomposition or
+		// execution for) a windowed task while it is outside its allowed hours. The
+		// queued task waits until both a slot is free and the window is open; the
+		// window sweep is not relied on to re-pause a run that should never start.
+		if runWindowClosedNow(lifecycle, time.Now()) {
+			continue
+		}
 		mode := lifecycle.QueueMode
 		if mode != "bootstrap" && mode != "resume" {
 			mode = s.resumeAdmissionMode(task)
@@ -364,6 +382,128 @@ func (s *Server) reconcileConcurrency() {
 		s.engine.decInflight(task.ID)
 		slots--
 	}
+}
+
+// formatRunWindow renders a lifecycle's run window as "01:00–06:00 Asia/Seoul" for
+// display in activity summaries and hints.
+func formatRunWindow(l taskLifecycleState) string {
+	return fmt.Sprintf("%02d:%02d–%02d:%02d %s",
+		l.RunWindowStartMin/60, l.RunWindowStartMin%60,
+		l.RunWindowEndMin/60, l.RunWindowEndMin%60, l.RunWindowTZ)
+}
+
+// reconcileRunWindows enforces per-task run windows ("작업 시간대"): it auto-pauses a
+// non-paused task when the current time is outside its window, and auto-resumes a
+// window-paused task when the window reopens. Best-effort, driven by the 5s scheduler
+// tick (so a transition lands within one tick). All state is persisted on the task row,
+// so a restart re-evaluates correctly. It must NOT hold s.concMu: the pause/resume
+// helpers acquire it themselves.
+func (s *Server) reconcileRunWindows() {
+	now := time.Now()
+	for _, task := range s.m.List() {
+		lifecycle := task.lifecycleSnapshot()
+		if lifecycle.RunWindowTZ == "" || isTerminalStatus(lifecycle.Status) || s.engine.IsDeleting(task.ID) {
+			continue
+		}
+		open, err := RunWindowOpenAt(lifecycle.RunWindowTZ, lifecycle.RunWindowStartMin, lifecycle.RunWindowEndMin, now)
+		if err != nil {
+			log.Printf("[run-window] task %s has an invalid window (%s %d-%d): %v",
+				task.ID, lifecycle.RunWindowTZ, lifecycle.RunWindowStartMin, lifecycle.RunWindowEndMin, err)
+			continue
+		}
+		paused := lifecycle.Paused || s.engine.IsPaused(task.ID)
+		switch {
+		case !open && !paused:
+			s.pauseForRunWindow(task)
+		case open && paused && lifecycle.RunWindowPaused:
+			s.resumeForRunWindow(task)
+		}
+	}
+}
+
+// runWindowClosedNow reports whether a task's run window is configured and currently
+// closed. On an invalid window it returns false (fail open), matching
+// parkIfOutsideRunWindow, so a misconfigured window never wedges a task in the queue.
+func runWindowClosedNow(l taskLifecycleState, now time.Time) bool {
+	if l.RunWindowTZ == "" {
+		return false
+	}
+	open, err := RunWindowOpenAt(l.RunWindowTZ, l.RunWindowStartMin, l.RunWindowEndMin, now)
+	if err != nil {
+		return false
+	}
+	return !open
+}
+
+// parkIfOutsideRunWindow window-pauses a task at launch time when it has a run window
+// that is currently closed, returning true if it parked the task. Used by launchTask so
+// a windowed task never starts (or even decomposes goals) outside its window.
+func (s *Server) parkIfOutsideRunWindow(t *Task) bool {
+	lifecycle := t.lifecycleSnapshot()
+	if lifecycle.RunWindowTZ == "" {
+		return false
+	}
+	open, err := RunWindowOpenAt(lifecycle.RunWindowTZ, lifecycle.RunWindowStartMin, lifecycle.RunWindowEndMin, time.Now())
+	if err != nil {
+		log.Printf("[run-window] task %s has an invalid window at launch: %v", t.ID, err)
+		return false // invalid window: fail open, run normally
+	}
+	if open {
+		return false
+	}
+	s.pauseForRunWindow(t)
+	return true
+}
+
+// pauseForRunWindow pauses a task because it is outside its run window and records that
+// the pause was window-initiated (so only these auto-resume). Acquires s.concMu to stay
+// consistent with admission/FIFO, and re-checks state under the lock.
+func (s *Server) pauseForRunWindow(t *Task) {
+	s.concMu.Lock()
+	defer s.concMu.Unlock()
+	current, exists := s.m.Task(t.ID)
+	if !exists || current != t || s.engine.IsDeleting(t.ID) {
+		return
+	}
+	lifecycle := t.lifecycleSnapshot()
+	if lifecycle.RunWindowTZ == "" || isTerminalStatus(lifecycle.Status) {
+		return
+	}
+	if lifecycle.Paused || s.engine.IsPaused(t.ID) {
+		return // already paused (by the user or a prior sweep)
+	}
+	wasQueued := lifecycle.Queued
+	wasEnginePaused := s.engine.IsPaused(t.ID)
+	s.engine.Pause(t.ID, agent.AbortPausedByRunWindow)
+	if err := s.m.ApplyTaskPause(t.ID); err != nil {
+		if !wasEnginePaused && !wasQueued {
+			s.engine.Resume(t)
+		}
+		log.Printf("[run-window] task %s failed to pause: %v", t.ID, err)
+		return
+	}
+	s.cancelTaskChat(t.ID, agent.AbortChatPausedWithTask)
+	if err := s.m.SetTaskRunWindowPaused(t.ID, true); err != nil {
+		log.Printf("[run-window] task %s failed to mark window-paused: %v", t.ID, err)
+	}
+	s.engine.emitActivity(t, db.Activity{Worker: "system", Kind: "text",
+		Summary: fmt.Sprintf(runWindowPausedSummaryFmt, formatRunWindow(lifecycle))})
+}
+
+// resumeForRunWindow resumes a window-paused task when its window reopens, via the
+// standard admission path (which acquires s.concMu itself). The window-paused flag is
+// cleared only after a successful resume, so a failed resume is retried on the next tick.
+func (s *Server) resumeForRunWindow(t *Task) {
+	before := t.lifecycleSnapshot()
+	if _, err := s.admitPausedTask(t); err != nil {
+		log.Printf("[run-window] task %s failed to resume when its window opened: %v", t.ID, err)
+		return
+	}
+	if err := s.m.SetTaskRunWindowPaused(t.ID, false); err != nil {
+		log.Printf("[run-window] task %s resumed but failed to clear the window-paused flag: %v", t.ID, err)
+	}
+	s.engine.emitActivity(t, db.Activity{Worker: "system", Kind: "text",
+		Summary: fmt.Sprintf(runWindowResumedSummaryFmt, formatRunWindow(before))})
 }
 
 // reviveTask makes a stopped task run again: it pulls a terminal state (done/failed/timeout) back to running,

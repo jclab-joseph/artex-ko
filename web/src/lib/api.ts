@@ -281,6 +281,11 @@ export const api = {
     coverageEnabled?: boolean;
     agentId?: string; // execution-plane "pinned" mode: the sandbox Agent this task runs on
     interceptRules?: AssetInterceptRuleInput[];
+    // Per-task run window ("작업 시간대"): the task only runs during [startMin, endMin) minutes-from-midnight
+    // in the given IANA timezone. Empty tz = no window. startMin>endMin wraps past midnight.
+    runWindowTz?: string;
+    runWindowStartMin?: number;
+    runWindowEndMin?: number;
   }) =>
     post<Task>("/tasks", {
       name: input.name ?? "",
@@ -296,6 +301,9 @@ export const api = {
       coverage_enabled: input.coverageEnabled ?? true, // default on; false = disable the asset-coverage feature
       agent_id: input.agentId ?? "", // empty = not selected (in pinned mode the task will stand by)
       intercept_rules: input.interceptRules ?? [], // task-level asset intercept rules
+      run_window_tz: input.runWindowTz ?? "", // empty = no run window
+      run_window_start_min: input.runWindowStartMin ?? 0,
+      run_window_end_min: input.runWindowEndMin ?? 0,
     }),
   taskCategories: () => get<{ categories: TaskCategory[] }>("/task-categories").then((r) => arr(r.categories)),
   updateTask: (id: string, input: { name?: string; pinned?: boolean }) => patch<Task>(`/tasks/${id}`, input),
@@ -332,6 +340,13 @@ export const api = {
     }>(`/tasks/${id}/llm`, {
       llm_profile_ids: llmProfileIds,
       active_llm_profile_id: activeLLMProfileId ?? null,
+    }),
+  // Set/change/clear a task's run window ("작업 시간대"). Empty tz clears the window.
+  setTaskRunWindow: (id: string, input: { tz: string; startMin: number; endMin: number }) =>
+    put<Task>(`/tasks/${id}/run-window`, {
+      run_window_tz: input.tz,
+      run_window_start_min: input.startMin,
+      run_window_end_min: input.endMin,
     }),
   deleteTask: (id: string, options: DeleteTaskOptions) => del<DeleteTaskResult>(`/tasks/${id}`, options),
   controlTask: (id: string, action: "pause" | "resume") =>

@@ -524,6 +524,10 @@ CREATE TABLE IF NOT EXISTS tasks (
     timeout_seconds INTEGER NOT NULL DEFAULT 0,
     plan_heartbeat_seconds INTEGER NOT NULL DEFAULT 300,
     coverage_enabled BOOLEAN NOT NULL DEFAULT true,
+    run_window_tz        TEXT    NOT NULL DEFAULT '',  -- per-task run window: IANA zone (''=no window / feature off)
+    run_window_start_min INTEGER NOT NULL DEFAULT 0,   -- window start, minutes from midnight [0,1440)
+    run_window_end_min   INTEGER NOT NULL DEFAULT 0,   -- window end, minutes from midnight [0,1440); start>end wraps past midnight
+    run_window_paused    BOOLEAN NOT NULL DEFAULT false, -- true = the current pause was initiated by the run-window sweep (so only these auto-resume)
     exec_agent_id  TEXT NOT NULL DEFAULT '',  -- execution-plane split "pinned" mode: the sandbox Agent id this task always runs on (empty=not selected)
     pinned_at      TIMESTAMPTZ,
     first_run_at   TIMESTAMPTZ,
@@ -555,6 +559,13 @@ ALTER TABLE tasks ADD COLUMN IF NOT EXISTS queued_at TIMESTAMPTZ;
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS queue_mode TEXT NOT NULL DEFAULT '';
 -- Optional task name; backfill for old DBs. Empty string=unnamed; the frontend falls back to the description when displaying.
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS name TEXT NOT NULL DEFAULT '';
+-- Per-task run window ("작업 시간대"); backfill for old DBs. ''=no window. start/end are minutes from
+-- midnight [0,1440); start>end wraps past midnight. run_window_paused marks a pause the window sweep
+-- initiated so only those auto-resume (a manual user pause is left alone). See server/runwindow.go.
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS run_window_tz        TEXT    NOT NULL DEFAULT '';
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS run_window_start_min INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS run_window_end_min   INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS run_window_paused    BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS category_id BIGINT REFERENCES task_categories(id) ON DELETE SET NULL;
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS pinned_at TIMESTAMPTZ;
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS active_llm_profile_id BIGINT REFERENCES llm_profiles(id) ON DELETE SET NULL;

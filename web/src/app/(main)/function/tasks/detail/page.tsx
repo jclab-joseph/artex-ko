@@ -5,7 +5,16 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 
-import { ArchiveIcon, ArrowLeftIcon, BrainIcon, CheckIcon, CircleAlertIcon, PauseIcon, PlayIcon } from "lucide-react";
+import {
+  ArchiveIcon,
+  ArrowLeftIcon,
+  BrainIcon,
+  CalendarClockIcon,
+  CheckIcon,
+  CircleAlertIcon,
+  PauseIcon,
+  PlayIcon,
+} from "lucide-react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
@@ -24,6 +33,9 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Popover,
   PopoverContent,
@@ -32,12 +44,14 @@ import {
   PopoverTitle,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { api } from "@/lib/api";
+import { hmToMin, minToHm, runWindowTimeZones } from "@/lib/run-window";
 import type { LLMProfile, Task } from "@/lib/types";
 
 import { AssetsTab } from "./_tabs/assets-tab";
@@ -197,6 +211,139 @@ function TaskLLMControl({ task, profiles, onUpdated }: { task: Task; profiles: L
           <Button type="button" size="sm" onClick={save} disabled={saving}>
             {saving && <Spinner data-icon="inline-start" />}
             {saveLabel}
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+// TaskRunWindowControl lets a task's run window ("작업 시간대") be set, changed, or cleared
+// after creation. Mirrors TaskLLMControl: a popover editor with the current window shown
+// on the trigger button. The change takes effect on the next scheduler sweep (within ~5s).
+function TaskRunWindowControl({ task, onUpdated }: { task: Task; onUpdated: () => void }) {
+  const t = useTranslations("taskDetail.runWindow");
+  const enabled = !!task.run_window_tz;
+  const [open, setOpen] = React.useState(false);
+  const [draftEnabled, setDraftEnabled] = React.useState(enabled);
+  const [start, setStart] = React.useState(minToHm(task.run_window_start_min ?? 60));
+  const [end, setEnd] = React.useState(minToHm(task.run_window_end_min ?? 360));
+  const [tz, setTz] = React.useState(task.run_window_tz || "Asia/Seoul");
+  const [saving, setSaving] = React.useState(false);
+
+  const syncDraft = React.useCallback(() => {
+    setDraftEnabled(!!task.run_window_tz);
+    setStart(minToHm(task.run_window_start_min ?? 60));
+    setEnd(minToHm(task.run_window_end_min ?? 360));
+    setTz(task.run_window_tz || "Asia/Seoul");
+  }, [task]);
+
+  const handleOpenChange = (next: boolean) => {
+    setOpen(next);
+    if (next) syncDraft();
+  };
+
+  const currentLabel = enabled
+    ? `${minToHm(task.run_window_start_min ?? 0)}–${minToHm(task.run_window_end_min ?? 0)}`
+    : t("none");
+
+  const save = async () => {
+    if (draftEnabled && hmToMin(start) === hmToMin(end)) {
+      toast.error(t("equalError"));
+      return;
+    }
+    setSaving(true);
+    try {
+      await api.setTaskRunWindow(task.id, {
+        tz: draftEnabled ? tz : "",
+        startMin: draftEnabled ? hmToMin(start) : 0,
+        endMin: draftEnabled ? hmToMin(end) : 0,
+      });
+      toast.success(t("updated"));
+      setOpen(false);
+      onUpdated();
+    } catch (error) {
+      toast.error(t("updateFailed", { message: (error as Error).message }));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Popover open={open} onOpenChange={handleOpenChange}>
+      <PopoverTrigger asChild>
+        <Button
+          size="sm"
+          variant={enabled ? "outline" : "ghost"}
+          aria-label={t("controlAria")}
+          title={enabled ? `${currentLabel} ${task.run_window_tz}` : t("none")}
+        >
+          <CalendarClockIcon data-icon="inline-start" />
+          <span className="hidden max-w-36 truncate lg:inline">{currentLabel}</span>
+          {task.run_window_paused && <span className="hidden text-muted-foreground xl:inline">⏸</span>}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-[min(26rem,calc(100vw-2rem))] gap-4 p-4">
+        <PopoverHeader>
+          <PopoverTitle>{t("title")}</PopoverTitle>
+          <PopoverDescription>{t("description")}</PopoverDescription>
+        </PopoverHeader>
+
+        <label htmlFor="rw-enabled" className="flex items-center gap-2 text-sm">
+          <Checkbox id="rw-enabled" checked={draftEnabled} onCheckedChange={(v) => setDraftEnabled(!!v)} />
+          {t("enable")}
+        </label>
+
+        {draftEnabled && (
+          <div className="grid gap-3">
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="grid gap-1">
+                <Label htmlFor="rw-start" className="text-xs">
+                  {t("start")}
+                </Label>
+                <Input
+                  id="rw-start"
+                  type="time"
+                  className="w-32"
+                  value={start}
+                  onChange={(e) => setStart(e.target.value)}
+                />
+              </div>
+              <div className="grid gap-1">
+                <Label htmlFor="rw-end" className="text-xs">
+                  {t("end")}
+                </Label>
+                <Input id="rw-end" type="time" className="w-32" value={end} onChange={(e) => setEnd(e.target.value)} />
+              </div>
+            </div>
+            <div className="grid gap-1">
+              <Label htmlFor="rw-tz" className="text-xs">
+                {t("timezone")}
+              </Label>
+              <Select value={tz} onValueChange={setTz}>
+                <SelectTrigger id="rw-tz" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="max-h-72">
+                  {runWindowTimeZones().map((z) => (
+                    <SelectItem key={z} value={z}>
+                      {z}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <p className="text-muted-foreground text-xs">{t("note")}</p>
+          </div>
+        )}
+
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="outline" size="sm" onClick={() => setOpen(false)}>
+            {t("close")}
+          </Button>
+          <Button type="button" size="sm" onClick={save} disabled={saving}>
+            {saving && <Spinner data-icon="inline-start" />}
+            {t("save")}
           </Button>
         </div>
       </PopoverContent>
@@ -369,6 +516,7 @@ function TaskDetailInner() {
           </code>
           <Separator orientation="vertical" className="mx-1 hidden h-4 sm:block" />
           <TaskLLMControl task={task} profiles={profiles} onUpdated={load} />
+          <TaskRunWindowControl task={task} onUpdated={load} />
           <StatusBadge domain={terminal ? "task" : "engine"} value={terminal ? task.status : engineMode} dot />
           {canArchive ? (
             <AlertDialog>
