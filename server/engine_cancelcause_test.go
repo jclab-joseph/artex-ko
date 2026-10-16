@@ -182,6 +182,15 @@ func TestTaskPauseCauseSurvivesImmediateResume(t *testing.T) {
 	}
 }
 
+func TestRunWindowPauseReturnsRunningIntentToFrontier(t *testing.T) {
+	// A run cancelled because the task left its allowed run window must be classified
+	// as a task pause, so the in-flight intent rolls back to the frontier (open) and
+	// is reclaimed when the window reopens — not settled as blocked/done.
+	if !taskExecutionPaused(agent.AbortPausedByRunWindow) {
+		t.Fatal("run-window pause must settle a running intent as open so it is re-run when the window reopens")
+	}
+}
+
 func TestDeleteCancellationReturnsRunningIntentToFrontier(t *testing.T) {
 	if !taskExecutionPaused(agent.AbortTaskDeleted) {
 		t.Fatal("delete cancellation must settle a running intent as open so AbortDelete can resume it")

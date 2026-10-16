@@ -357,6 +357,13 @@ func (s *Server) reconcileConcurrency() {
 		if lifecycle.Paused || (enabled && !s.engine.ReadyFor(task)) {
 			continue
 		}
+		// Per-task run window: never promote (and thus start goal decomposition or
+		// execution for) a windowed task while it is outside its allowed hours. The
+		// queued task waits until both a slot is free and the window is open; the
+		// window sweep is not relied on to re-pause a run that should never start.
+		if runWindowClosedNow(lifecycle, time.Now()) {
+			continue
+		}
 		mode := lifecycle.QueueMode
 		if mode != "bootstrap" && mode != "resume" {
 			mode = s.resumeAdmissionMode(task)
@@ -412,6 +419,20 @@ func (s *Server) reconcileRunWindows() {
 			s.resumeForRunWindow(task)
 		}
 	}
+}
+
+// runWindowClosedNow reports whether a task's run window is configured and currently
+// closed. On an invalid window it returns false (fail open), matching
+// parkIfOutsideRunWindow, so a misconfigured window never wedges a task in the queue.
+func runWindowClosedNow(l taskLifecycleState, now time.Time) bool {
+	if l.RunWindowTZ == "" {
+		return false
+	}
+	open, err := RunWindowOpenAt(l.RunWindowTZ, l.RunWindowStartMin, l.RunWindowEndMin, now)
+	if err != nil {
+		return false
+	}
+	return !open
 }
 
 // parkIfOutsideRunWindow window-pauses a task at launch time when it has a run window

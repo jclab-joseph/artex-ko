@@ -97,3 +97,31 @@ func TestRunWindowOpenAt(t *testing.T) {
 		t.Error("empty tz should error (no window configured)")
 	}
 }
+
+func TestRunWindowClosedNow(t *testing.T) {
+	seoul, err := time.LoadLocation("Asia/Seoul")
+	if err != nil {
+		t.Fatalf("LoadLocation Asia/Seoul: %v", err)
+	}
+	at := func(h, m int) time.Time { return time.Date(2026, 6, 15, h, m, 0, 0, seoul) }
+	win := func(tz string, start, end int) taskLifecycleState {
+		return taskLifecycleState{RunWindowTZ: tz, RunWindowStartMin: start, RunWindowEndMin: end}
+	}
+
+	// No window configured → never "closed" (feature off).
+	if runWindowClosedNow(win("", 0, 0), at(12, 0)) {
+		t.Error("an unconfigured window must never block promotion")
+	}
+	// Inside 01:00–06:00 KST → open, not closed.
+	if runWindowClosedNow(win("Asia/Seoul", 60, 360), at(3, 0)) {
+		t.Error("03:00 KST is inside 01:00-06:00, must not be reported closed")
+	}
+	// Outside the window → closed (blocks promotion).
+	if !runWindowClosedNow(win("Asia/Seoul", 60, 360), at(12, 0)) {
+		t.Error("12:00 KST is outside 01:00-06:00, must be reported closed")
+	}
+	// Invalid window → fail open (not closed), so a bad config never wedges the queue.
+	if runWindowClosedNow(win("Mars/Olympus", 60, 360), at(12, 0)) {
+		t.Error("an invalid window must fail open, not block the queue")
+	}
+}
