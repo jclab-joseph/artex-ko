@@ -406,9 +406,21 @@ func (s *Server) restoreTaskRuntimes() {
 	// FIFO. Paused loops remain idle; queued tasks are admitted below as slots allow.
 	for _, t := range m.List() {
 		lifecycle := t.lifecycleSnapshot()
-		if !lifecycle.Queued && !isTerminalStatus(lifecycle.Status) {
-			s.engine.Run(s.ctx, t)
+		if lifecycle.Queued || isTerminalStatus(lifecycle.Status) {
+			continue
 		}
+		// A task paused before its goals were ever decomposed (e.g. parked outside its
+		// run window at creation) must NOT get an idle planner loop restored here. Its
+		// window resume runs in bootstrap mode, where Resume unpauses this restored loop
+		// and then decomposes goals asynchronously — the loop can wake first, find no
+		// open goal and no active intent, and settle the task to done before the first
+		// goal exists. Such a paused task occupies no concurrency slot, so skipping its
+		// loop cannot block the FIFO; the bootstrap resume path (startTaskEngine) creates
+		// the loop itself, after goals are in place.
+		if lifecycle.Paused && s.resumeAdmissionMode(t) == "bootstrap" {
+			continue
+		}
+		s.engine.Run(s.ctx, t)
 	}
 }
 
